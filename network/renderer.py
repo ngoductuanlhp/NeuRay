@@ -19,7 +19,7 @@ from utils.base_utils import to_cuda, load_cfg, color_map_backward, get_coords_m
 from utils.draw_utils import concat_images_list
 from utils.imgs_info import build_imgs_info, imgs_info_to_torch, imgs_info_slice
 from utils.view_select import compute_nearest_camera_indices, select_working_views
-
+from torch.nn import functional as F
 
 class NeuralRayBaseRenderer(nn.Module):
     base_cfg={
@@ -154,16 +154,65 @@ class NeuralRayBaseRenderer(nn.Module):
         hit_prob_que = self.predict_self_hit_prob_impl(que_ray_feats, que_depth, que_dists, que_imgs_info['depth_range'], is_fine)
         return hit_prob_que
 
-    def network_rendering(self, prj_dict, que_dir, is_fine):
+    def network_rendering(self, prj_dict, que_dir, is_fine, prompt):
         if is_fine:
-            density, colors = self.fine_agg_net(prj_dict, que_dir)
+            density, colors, m_hit_prob, out_ibr, out_prompt = self.fine_agg_net(prj_dict, que_dir, prompt)
         else:
-            density, colors = self.agg_net(prj_dict, que_dir)
+            density, colors, m_hit_prob, out_ibr, out_prompt = self.agg_net(prj_dict, que_dir, prompt)
 
         alpha_values = 1.0 - torch.exp(-torch.relu(density))
         hit_prob = alpha_values2hit_prob(alpha_values)
         pixel_colors = torch.sum(hit_prob.unsqueeze(-1)*colors,2)
-        return hit_prob, colors, pixel_colors
+        return hit_prob, colors, pixel_colors, m_hit_prob, out_ibr, out_prompt
+
+    # def network_rendering(self, prj_dict, que_dir, is_fine, prompt):
+    #     if is_fine:
+    #         density, colors = self.fine_agg_net(prj_dict, que_dir, prompt)
+    #     else:
+    #         density, colors = self.agg_net(prj_dict, que_dir, prompt)
+
+    #     alpha_values = 1.0 - torch.exp(-torch.relu(density))
+    #     hit_prob = alpha_values2hit_prob(alpha_values)
+    #     pixel_colors = torch.sum(hit_prob.unsqueeze(-1)*colors,2)
+    #     return hit_prob, colors, pixel_colors
+
+    def compute_prompt_feat(self, que_pts, que_dir, prompt_feats):
+        min_range = torch.Tensor([-1, 0, -1]).to(que_pts.device)
+        max_range = torch.Tensor([1, 0.9, 1]).to(que_pts.device)
+        # que_pts# qn,rn,dn,3
+        qn, rn, dn,_ = que_pts.shape
+        que_pts_flatten = que_pts.reshape(qn * rn * dn, -1) # n_samples, 3
+
+        # print('range', torch.min(que_pts_flatten,dim=0)[0], torch.max(que_pts_flatten, dim=0)[0])
+
+        size = (max_range - min_range).reshape(-1,3)
+        que_pts_flatten = 2*(que_pts_flatten - min_range.reshape(-1,3))/ size - 1.
+
+
+        que_pts_flatten_T = que_pts_flatten.permute(1,0) # 3, n_samples
+        coordinate_line = torch.stack((torch.zeros_like(que_pts_flatten_T), que_pts_flatten_T), dim=-1).detach().view(3, -1, 1, 2) # (3, N, 1, 2) 
+
+        line_coef_point = F.grid_sample(prompt_feats['0'],coordinate_line[[0]],
+                                        align_corners=True).view(-1,*que_pts_flatten.shape[:1])
+        
+        line_coef_point = line_coef_point * F.grid_sample(prompt_feats['1'], coordinate_line[[1]],
+                                        align_corners=True).view(-1,*que_pts_flatten.shape[:1])
+        
+        line_coef_point = line_coef_point * F.grid_sample(prompt_feats['2'], coordinate_line[[2]],
+                                        align_corners=True).view(-1,*que_pts_flatten.shape[:1]) # (channel_dim, N_Sample)
+        line_coef_point = line_coef_point.T.reshape(qn, rn, dn, -1)
+
+        return line_coef_point
+
+        # que_pts_rs = que_pts.reshape(qn*rn*dn, -1)
+        # que_dir_rs = que_dir.reshape(qn*rn*dn, -1)
+        # line_coef_point_rgb = self.bm_rgb(torch.cat([line_coef_point[:, 0:64], que_pts_rs, que_dir_rs], dim=-1))
+        # line_coef_point_sig = self.bm_sig(torch.cat([line_coef_point[:, 64:], que_pts_rs], dim=-1))
+
+        # line_coef_point_final = torch.cat([line_coef_point_rgb, line_coef_point_sig], dim=-1)
+        # line_coef_point_final = line_coef_point_final.reshape(qn, rn, dn, -1)
+        
+        # return line_coef_point_final
 
     def render_by_depth(self, que_depth, que_imgs_info, ref_imgs_info, is_train, is_fine):
         ref_imgs_info = ref_imgs_info.copy()
@@ -175,8 +224,15 @@ class NeuralRayBaseRenderer(nn.Module):
         prj_dict = self.predict_proj_ray_prob(prj_dict, ref_imgs_info, que_dists, is_fine)
         prj_dict = self.get_img_feats(ref_imgs_info, prj_dict)
 
-        hit_prob_nr, colors_nr, pixel_colors_nr = self.network_rendering(prj_dict, que_dir, is_fine)
-        outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr}
+        prompt = self.compute_prompt_feat(que_pts, que_dir, self.prompt_feats)
+        
+
+        hit_prob_nr, colors_nr, pixel_colors_nr, m_hit_prob, out_ibr, out_prompt = self.network_rendering(prj_dict, que_dir, is_fine, prompt)
+        outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr,\
+                'm_hit_prob': m_hit_prob, 'out_ibr': out_ibr, 'out_prompt': out_prompt}
+
+        # hit_prob_nr, colors_nr, pixel_colors_nr = self.network_rendering(prj_dict, que_dir, is_fine, prompt)
+        # outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr}
 
         # direct rendering
         if self.cfg['use_dr_prediction']:
@@ -434,6 +490,13 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         return ray_feats_cur
 
     def _initialization(self):
+        self.prompt_feats = nn.ParameterDict()
+        for i in range(3):
+            # self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 3 + 16, 128, 1]))
+            self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 3+16, 128, 1]))
+        # self.bm_rgb = nn.Linear(64+3+3, 3, bias=False)
+        # self.bm_sig = nn.Linear(64+3, 16, bias=False)
+
         self.ray_feats = nn.ParameterList()
         if self.cfg['gen_cfg'] is not None:
             # load generalization model

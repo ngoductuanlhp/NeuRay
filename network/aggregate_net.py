@@ -31,7 +31,7 @@ class DefaultAggregationNet(nn.Module):
             nn.Linear(dim, dim),
         )
 
-    def forward(self, prj_dict, que_dir):
+    def forward(self, prj_dict, que_dir, prompt):
         """
         :param prj_dict
              prj_ray_feats: rfn,qn,rn,dn,f
@@ -50,6 +50,10 @@ class DefaultAggregationNet(nn.Module):
             hit_prob_val, vis_val, prj_dict['rgb'], prj_dict['dir'], prj_dict['ray_feats']
         rfn,qn,rn,dn,_ = hit_prob_val.shape
 
+        
+        # db_hit_prob = prj_dict['hit_prob'].flatten()
+        # print('db_hit_prob range', torch.min(db_hit_prob), torch.max(db_hit_prob), torch.mean(db_hit_prob))
+
         prob_embedding = self.prob_embed(torch.cat([prj_ray_feats, prj_hit_prob, prj_vis],-1))
 
         dir_diff = get_dir_diff(prj_dir, que_dir)
@@ -59,13 +63,28 @@ class DefaultAggregationNet(nn.Module):
 
         prj_img_feats = prj_dict['img_feats']
         prj_img_feats = torch.cat([prj_rgb, prj_img_feats], -1)
-        prj_img_feats = prj_img_feats.reshape(rfn, qn * rn, dn, -1).permute(1, 2, 0, 3)
+        prj_img_feats = prj_img_feats.reshape(rfn, qn * rn, dn, -1).permute(1, 2, 0, 3) # n_ray, n_sample, n_view, channel
         prob_embedding = prob_embedding.reshape(rfn, qn * rn, dn, -1).permute(1, 2, 0, 3)
-        outs = self.agg_impl(prj_img_feats, prob_embedding, dir_diff, valid_mask)
 
-        colors = outs[...,:3] # qn*rn,dn,3
-        density = outs[...,3] # qn*rn,dn,0
-        return density.reshape(qn,rn,dn), colors.reshape(qn,rn,dn,3)
+
+        mean_hit_prob = torch.mean(prj_dict['hit_prob'].reshape(rfn, qn * rn, dn, -1).permute(1, 2, 0, 3), dim=2) # n_ray, n_sample, channel
+
+        # FIXME hardcode
+        # mean_hit_prob = torch.exp(-(1 - mean_hit_prob))
+
+        outs = self.agg_impl(prj_img_feats, prob_embedding, dir_diff, valid_mask, prompt, mean_hit_prob)
+
+        
+        # print('mean_hit_prob', mean_hit_prob.shape)
+        # colors_mix = mean_hit_prob * outs['out_ibr'][...,:3] + (1. - mean_hit_prob) * outs['out_prompt'][...,:3]
+        # density_mix = mean_hit_prob * outs['out_ibr'][...,3:4] + (1. - mean_hit_prob) * outs['out_prompt'][...,3:4]
+        colors_mix = outs['out_ibr'][...,:3]
+        density_mix = outs['out_ibr'][...,3:4]
+
+        return density_mix.reshape(qn,rn,dn), colors_mix.reshape(qn,rn,dn,3), mean_hit_prob.reshape(qn,rn,dn,1), outs['out_ibr'].reshape(qn,rn,dn,4), outs['out_prompt'].reshape(qn,rn,dn,4)
+        # colors = outs[...,:3] # qn*rn,dn,3
+        # density = outs[...,3] # qn*rn,dn,0
+        # return density.reshape(qn,rn,dn), colors.reshape(qn,rn,dn,3)
 
 
 name2agg_net={

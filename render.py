@@ -46,13 +46,14 @@ def prepare_render_info(database, pose_type, pose_fn, use_depth):
         render_ids = None
     return que_poses, que_Ks, que_shapes, que_depth_ranges, ref_ids, render_ids
 
-def save_renderings(output_dir, qi, render_info, h, w):
+def save_renderings(output_dir, qi, render_info, h, w, save_fine_only=False):
     def output_image(suffix):
         if f'pixel_colors_{suffix}' in render_info:
             render_image = color_map_backward(render_info[f'pixel_colors_{suffix}'].cpu().numpy().reshape([h, w, 3]))
             imsave(f'{output_dir}/{qi}-{suffix}.jpg', render_image)
 
-    output_image('nr')
+    if not save_fine_only:
+        output_image('nr')
     output_image('nr_fine')
 
 def save_depth(output_dir, qi, render_info, h, w, depth_range):
@@ -73,9 +74,9 @@ def render_video_gen(database_name: str,
     default_render_cfg = {
         'min_wn': 8, # working view number
         'ref_pad_interval': 16, # input image size should be multiple of 16
-        'use_src_imgs': False, # use source images to construct cost volume or not
+        'use_src_imgs': True, # use source images to construct cost volume or not
         'cost_volume_nn_num': 3, # number of source views used in cost volume
-        'use_depth': True, # use colmap depth in rendering or not
+        'use_depth': False, # use colmap depth in rendering or not
     }
 
     # load render cfg
@@ -124,7 +125,7 @@ def render_video_gen(database_name: str,
             ref_imgs_info = imgs_info_slice(ref_imgs_info, ref_real_idx)
             ref_imgs_info['nn_ids'] = ref_cv_idx
         else:
-            ref_imgs_info = build_imgs_info(database, ref_ids, render_cfg["ref_pad_interval"])
+            ref_imgs_info = build_imgs_info(database, ref_ids, render_cfg["ref_pad_interval"], has_depth=False)
 
         ref_imgs_info = to_cuda(imgs_info_to_torch(ref_imgs_info))
         data['ref_imgs_info']=ref_imgs_info
@@ -132,7 +133,7 @@ def render_video_gen(database_name: str,
         with torch.no_grad():
             render_info = renderer(data)
         h, w = que_shapes[qi]
-        save_renderings(output_dir, qi, render_info, h, w)
+        save_renderings(output_dir, qi, render_info, h, w, save_fine_only=True)
         if render_depth:
             save_depth(output_dir, qi, render_info, h, w, que_depth_ranges[qi])
         if pose_type=='eval':
@@ -181,6 +182,12 @@ def render_video_ft(database_name, cfg_fn, pose_type, pose_fn, render_depth=Fals
         save_renderings(output_dir, qi, render_info, h, w)
         if render_depth:
             save_depth(output_dir, qi, render_info, h, w, que_depth_ranges[qi])
+
+        if pose_type=='eval':
+            gt_dir = f'data/render/{database_name}/gt'
+            Path(gt_dir).mkdir(exist_ok=True, parents=True)
+            if not (Path(gt_dir)/f'{qi}.jpg').exists():
+                imsave(f'{gt_dir}/{qi}.jpg',database.get_image(render_ids[qi]))
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser()

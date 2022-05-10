@@ -27,6 +27,8 @@ class ValidationEvaluator:
                 for loss in losses:
                     loss_results=loss(outputs, data, step, data_index=data_i, model_name=model_name)
                     for k,v in loss_results.items():
+                        if k == 'loss_prompt':
+                            continue
                         if type(v)==torch.Tensor:
                             v=v.detach().cpu().numpy()
 
@@ -36,6 +38,8 @@ class ValidationEvaluator:
                             eval_results[k]=[v]
 
         for k,v in eval_results.items():
+            if k == 'loss_prompt':
+                continue
             eval_results[k]=np.concatenate(v,axis=0)
 
         key_metric_val=self.key_metric(eval_results)

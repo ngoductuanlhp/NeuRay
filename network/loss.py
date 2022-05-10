@@ -15,6 +15,25 @@ class Loss:
     def __call__(self, data_pr, data_gt, step, **kwargs):
         pass
 
+class PromptLoss(Loss):
+    default_cfg={}
+    def __init__(self, cfg):
+        self.cfg={**self.default_cfg,**cfg}
+        super().__init__([f'loss_prompt'])
+
+    def __call__(self, data_pr, data_gt, step, **kwargs):
+        if 'out_prompt' not in data_pr: {'loss_prompt': torch.Tensor([0.])}
+
+        m_hit_prob = data_pr['m_hit_prob']
+        m_hit_prob_mask = (m_hit_prob >= 0.5).detach()
+        if torch.count_nonzero(m_hit_prob_mask) == 0:
+            return {'loss_prompt': torch.Tensor([0.])}
+        out_ibr = data_pr['out_ibr'][m_hit_prob_mask.repeat(1,1,1,data_pr['out_ibr'].shape[-1])].detach()
+        out_prompt = data_pr['out_prompt'][m_hit_prob_mask.repeat(1,1,1,data_pr['out_prompt'].shape[-1])]
+        loss_prompt = torch.mean((out_prompt - out_ibr)**2) * 1e-4
+        outputs = {'loss_prompt': loss_prompt}
+        return outputs
+
 class ConsistencyLoss(Loss):
     default_cfg={
         'use_ray_mask': False,
@@ -135,4 +154,5 @@ name2loss={
     'render': RenderLoss,
     'depth': DepthLoss,
     'consist': ConsistencyLoss,
+    'prompt': PromptLoss,
 }

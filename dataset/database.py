@@ -13,7 +13,7 @@ from asset import LLFF_ROOT, nerf_syn_val_ids, NERF_SYN_ROOT
 from colmap.read_write_dense import read_array
 from colmap.read_write_model import read_cameras_binary, read_images_binary, read_points3d_binary
 from utils.base_utils import downsample_gaussian_blur, color_map_backward, resize_img, read_pickle, project_points, \
-    save_pickle, transform_points_Rt, pose_inverse
+    save_pickle, transform_points_Rt, pose_inverse, read_pfm
 from PIL import Image
 
 from utils.llff_utils import load_llff_data
@@ -133,6 +133,133 @@ class LLFFColmapDatabase(BaseDatabase):
 
     def get_depth_range(self,img_id):
         return self.bounds[int(img_id)-1]
+
+class DTUTestSparseDatabase(BaseDatabase):
+    def __init__(self, database_name):
+        super().__init__(database_name)
+        _, model_name, background_size = database_name.split('/')
+        root_dir = f'data/dtu_test/{model_name}'
+        self.root_dir = root_dir
+        background, image_size = background_size.split('_')
+        image_size = int(image_size)
+        self.model_name = model_name
+        self.image_size = image_size
+        self.background = background
+        self.ratio = image_size / 1600
+        self.h, self.w = int(self.ratio*1200), int(image_size)
+
+        self._coord_trans_world = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]],dtype=np.float32,)
+
+        rgb_paths = [x for x in glob.glob(os.path.join(root_dir, "image", "*")) if (x.endswith(".jpg") or x.endswith(".png"))]
+        rgb_paths = sorted(rgb_paths)
+
+        self.depth_range=np.load(f'{self.root_dir}/depth_range.npy')
+
+        # print('debug', self.depth_range)
+
+        all_cam = np.load(os.path.join(root_dir, "cameras.npz"))
+        self.Rts=[]
+        self.Ks=[]
+        self.img_ids=[]
+        for i, rgb_path in enumerate(rgb_paths):
+            P = all_cam["world_mat_" + str(i)]
+            P = P[:3]
+            K, R, t = cv2.decomposeProjectionMatrix(P)[:3]
+
+            pose = np.eye(4, dtype=np.float32)
+            pose[:3, :3] = R.transpose()
+            pose[:3, 3] = (t[:3] / t[3])[:, 0]
+
+            scale_mtx = all_cam.get("scale_mat_" + str(i))
+            if scale_mtx is not None:
+                norm_trans = scale_mtx[:3, 3:]
+                norm_scale = np.diagonal(scale_mtx[:3, :3])[..., None]
+
+                pose[:3, 3:] -= norm_trans
+                pose[:3, 3:] /= norm_scale
+            pose = self._coord_trans_world @ pose # @ self._coord_trans_cam
+            pose = pose[:3]
+            pose = np.concatenate([pose[:,:3].T,- pose[:,:3].T @ pose[:,3:]],1)
+
+            self.Ks.append(np.diag([self.ratio,self.ratio,1]) @ K)
+            self.Rts.append(pose[:3])
+            self.img_ids.append(f'{i}')
+
+
+        self.img_id2imgs={}
+        self.img_id2depth={}
+        self.img_id2mask={}
+        self.depth_img_ids = [img_id for img_id in self.img_ids if self._depth_existence(img_id)]
+
+    def get_image(self, img_id):
+        if img_id in self.img_id2imgs:
+            return self.img_id2imgs[img_id]
+        img = imread(os.path.join(self.root_dir,'image',f'{int(img_id):08}.jpg'))
+        if self.w != 1600:
+            img = cv2.resize(downsample_gaussian_blur(img, self.ratio), (self.w, self.h), interpolation=cv2.INTER_LINEAR)
+
+        if self.background=='black':
+            mask = self.get_mask(img_id)
+            img = img * mask.astype(np.uint8)[:,:,None]
+        else:
+            raise NotImplementedError
+        self.img_id2imgs[img_id]=img
+        return img
+
+    def get_K(self, img_id):
+        return self.Ks[int(img_id)].copy()
+
+    def get_pose(self, img_id):
+        return self.Rts[int(img_id)].copy()
+
+    def get_img_ids(self,check_depth_exist=False):
+        return self.img_ids
+
+    def get_bbox(self, img_id):
+        raise NotImplementedError
+
+    def _depth_existence(self,img_id):
+        fn = f'{self.root_dir}/depth_maps/{img_id}.jpg.geometric.bin'
+        return os.path.exists(fn)
+
+    def get_depth(self, img_id):
+        if img_id in self.img_id2depth:
+            return self.img_id2depth[img_id]
+
+        depth = np.zeros([self.h, self.w], dtype=np.float32)
+        depth=np.ascontiguousarray(depth, dtype=np.float32)
+        if self.w != 800: depth = cv2.resize(depth, (self.w,self.h), interpolation=cv2.INTER_NEAREST)
+        depth[~self.get_mask(img_id)] = 0
+        self.img_id2depth[img_id] = depth
+        return depth
+        
+
+        # fn = f'{self.root_dir}/colmap_depth/{img_id}.jpg.geometric.bin'
+        # if os.path.exists(fn):
+        #     # depth = read_array(fn)
+        #     depth = np.zeros([self.h, self.w], dtype=np.float32)
+        #     depth=np.ascontiguousarray(depth, dtype=np.float32)
+        #     if self.w != 800: depth = cv2.resize(depth, (self.w,self.h), interpolation=cv2.INTER_NEAREST)
+        #     depth[~self.get_mask(img_id)] = 0
+        #     self.img_id2depth[img_id] = depth
+        #     return depth
+        # else:
+        #     raise NotImplementedError
+
+    def get_mask(self, img_id):
+        if img_id in self.img_id2mask:
+            return self.img_id2mask[img_id]
+        # mask = np.sum(imread(os.path.join(self.root_dir, 'mask', f'{int(img_id):03}.png')),-1)>0
+        
+        filename = os.path.join(self.root_dir, 'depth', 'depth_map_{:0>4}.pfm'.format(img_id))
+        mask = (np.array(read_pfm(filename)[0], dtype=np.float32) > 0)
+        if self.w!=1600:
+            mask = cv2.resize(mask.astype(np.uint8), (self.w, self.h), interpolation=cv2.INTER_NEAREST) > 0
+        self.img_id2mask[img_id]=mask
+        return mask
+
+    def get_depth_range(self,img_id):
+        return self.depth_range.copy()
 
 class DTUTestDatabase(BaseDatabase):
     def __init__(self, database_name):
@@ -989,6 +1116,7 @@ def parse_database_name(database_name:str)->BaseDatabase:
 
         # evaluation database
         'dtu_test': DTUTestDatabase,
+        'dtu_test_sparse': DTUTestSparseDatabase,
         'nerf_synthetic': NeRFSyntheticDatabase,
         'llff_colmap': LLFFColmapDatabase,
         'blended_mvs': BlendedMVSDatabase,
@@ -996,12 +1124,16 @@ def parse_database_name(database_name:str)->BaseDatabase:
     }
     database_type = database_name.split('/')[0]
     if database_type in name2database:
+        # print('database_name', database_name, database_type)
         return name2database[database_type](database_name)
-    else:
-        raise NotImplementedError
+    # elif database_type == 'dtu_test_sparse':
+    #     return name2database['dtu_test'](database_name)
+    # # else:
+    #     raise NotImplementedError
 
 def get_database_split(database: BaseDatabase, split_type='val'):
     database_name = database.database_name
+    # print('database_name', database_name, split_type)
     if split_type.startswith('val'):
         splits = split_type.split('_')
         depth_valid = not(len(splits)>1 and splits[1]=='all')
@@ -1011,9 +1143,15 @@ def get_database_split(database: BaseDatabase, split_type='val'):
         elif database_name.startswith('llff'):
             val_ids = database.get_img_ids()[::8]
             train_ids = [img_id for img_id in database.get_img_ids(check_depth_exist=depth_valid) if img_id not in val_ids]
+        elif database_name.startswith('dtu_test_sparse'):
+            train_ids = [6, 10, 15, 20, 29, 32, 35]
+            val_ids = [int(img_id) for img_id in database.get_img_ids(check_depth_exist=depth_valid) if int(img_id) not in train_ids]
         elif database_name.startswith('dtu_test'):
             val_ids = database.get_img_ids()[3:-3:8]
             train_ids = [img_id for img_id in database.get_img_ids(check_depth_exist=depth_valid) if img_id not in val_ids]
+        
+            # train_ids = [img_id for img_id in database.get_img_ids(check_depth_exist=depth_valid) if img_id not in val_ids]
+            
         else:
             raise NotImplementedError
     elif split_type.startswith('test'):
@@ -1025,11 +1163,17 @@ def get_database_split(database: BaseDatabase, split_type='val'):
         elif database_name.startswith('llff'):
             val_ids = database.get_img_ids()[::8]
             train_ids = [img_id for img_id in database.get_img_ids(check_depth_exist=depth_valid) if img_id not in val_ids]
+        elif database_name.startswith('dtu_test_sparse'):
+            train_ids = [6, 10, 15, 20, 29, 32, 35]
+            val_ids = [int(img_id) for img_id in database.get_img_ids(check_depth_exist=depth_valid) if int(img_id) not in train_ids]
         elif database_name.startswith('dtu_test'):
-            val_ids = database.get_img_ids()[3:-3:8]
+            # val_ids = database.get_img_ids()[3:-3:8]
+            val_ids = [0, 2, 25, 39, 46]
             train_ids = [img_id for img_id in database.get_img_ids(check_depth_exist=depth_valid) if img_id not in val_ids]
         else:
             raise NotImplementedError
     else:
         raise NotImplementedError
+
+    # print(train_ids, val_ids)
     return train_ids, val_ids

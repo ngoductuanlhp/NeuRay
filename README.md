@@ -150,6 +150,8 @@ python run_training.py --cfg configs/train/ft/neuray_ft_depth_birds.yaml
 
 # finetune the model initialized from cost volume
 python run_training.py --cfg configs/train/ft/neuray_ft_cv_lego.yaml
+
+CUDA_VISIBLE_DEVICES=2 python run_training.py --cfg configs/train/ft/neuray_ft_scene114_cv_prompt.yaml
 ```
 The finetuned models will be saved at `data/model`.
 
@@ -175,6 +177,11 @@ python render.py --cfg configs/ft/neuray_ft_lego_pretrain.yaml \
                  --pose_type eval \
                  --render_type ft
 ```
+
+CUDA_VISIBLE_DEVICES=2 python render.py --cfg configs/ft/neuray_ft_scene21_prompt.yaml \
+                 --database dtu_test_sparse/scene21/black_640 \
+                 --pose_type eval \
+                 --render_type ft
 
 ## Code explanation
 

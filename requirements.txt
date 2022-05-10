@@ -1,5 +1,5 @@
-pytorch>=1.4.0
-tensorflow>=2.0
+# pytorch>=1.4.0
+# tensorflow>=2.0
 easydict
 inplace-abn
 plyfile

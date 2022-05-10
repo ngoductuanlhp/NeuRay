@@ -312,7 +312,7 @@ class IBRNetWithNeuRay(nn.Module):
         sinusoid_table = torch.from_numpy(sinusoid_table).to("cuda:{}".format(0)).float().unsqueeze(0)
         return sinusoid_table
 
-    def forward(self, rgb_feat, neuray_feat, ray_diff, mask):
+    def forward(self, rgb_feat, neuray_feat, ray_diff, mask, prompt, mean_hit_prob):
         '''
         :param rgb_feat: rgbs and image features [n_rays, n_samples, n_views, n_feat]
         :param ray_diff: ray direction difference [n_rays, n_samples, n_views, 4], first 3 channels are directions,
@@ -332,6 +332,10 @@ class IBRNetWithNeuRay(nn.Module):
             weight = weight / (torch.sum(weight, dim=2, keepdim=True) + 1e-8) # means it will trust the one more with more consistent view point
         else:
             weight = mask / (torch.sum(mask, dim=2, keepdim=True) + 1e-8)
+        
+        # prompt feats
+        prompt_rgb_feats = prompt[..., :3].squeeze(0) # [n_rays, n_samples, 3]
+        prompt_sigma_feats = prompt[..., 3:].squeeze(0) # [n_rays, n_samples, 16]
 
         # neuray layer 0
         weight0 = torch.sigmoid(self.neuray_fc(neuray_feat)) * weight # [rn,dn,rfn,f]
@@ -340,7 +344,7 @@ class IBRNetWithNeuRay(nn.Module):
         globalfeat = torch.cat([mean0, var0, mean1, var1], dim=-1)  # [n_rays, n_samples, 1, 2*n_feat]
 
         x = torch.cat([globalfeat.expand(-1, -1, num_views, -1), rgb_feat, neuray_feat], dim=-1)  # [n_rays, n_samples, n_views, 3*n_feat]
-        x = self.base_fc(x)
+        x = self.base_fc(x) # [n_rays, n_samples, n_views, 32]
 
         x_vis = self.vis_fc(x * weight)
         x_res, vis = torch.split(x_vis, [x_vis.shape[-1]-1, 1], dim=-1)
@@ -352,18 +356,48 @@ class IBRNetWithNeuRay(nn.Module):
         mean, var = fused_mean_variance(x, weight)
         globalfeat = torch.cat([mean.squeeze(2), var.squeeze(2), weight.mean(dim=2)], dim=-1)  # [n_rays, n_samples, 32*2+1]
         globalfeat = self.geometry_fc(globalfeat)  # [n_rays, n_samples, 16]
+
+            # NOTE combine
+            # globalfeat = mean_hit_prob * globalfeat + (1. - mean_hit_prob) * prompt_sigma_feats
+
         num_valid_obs = torch.sum(mask, dim=2)
         globalfeat = globalfeat + self.pos_encoding
+
+        # print('ibr', globalfeat.shape, self.pos_encoding.shape)
         globalfeat, _ = self.ray_attention(globalfeat, globalfeat, globalfeat,
                                            mask=(num_valid_obs > 1).float())  # [n_rays, n_samples, 16]
         sigma = self.out_geometry_fc(globalfeat)  # [n_rays, n_samples, 1]
-        sigma_out = sigma.masked_fill(num_valid_obs < 1, 0.)  # set the sigma of invalid point to zero
+        sigma_out1 = sigma.masked_fill(num_valid_obs < 1, 0.)  # set the sigma of invalid point to zero
 
         # rgb computation
         x = torch.cat([x, vis, ray_diff], dim=-1)
         x = self.rgb_fc(x)
         x = x.masked_fill(mask == 0, -1e9)
         blending_weights_valid = F.softmax(x, dim=2)  # color blending
-        rgb_out = torch.sum(rgb_in*blending_weights_valid, dim=2)
-        out = torch.cat([rgb_out, sigma_out], dim=-1)
+
+        rgb_out1 = torch.sum(rgb_in*blending_weights_valid, dim=2)
+
+            # # NOTE combine
+            # rgb_out = mean_hit_prob * rgb_out1 + (1. - mean_hit_prob) * prompt_rgb_feats
+
+        # out = torch.cat([rgb_out, sigma_out1], dim=-1)
+
+        # return out
+        out1 = torch.cat([rgb_out1, sigma_out1], dim=-1)
+
+
+        
+
+
+
+        # print('promt', prompt_sigma_feats.shape,)
+        globalfeat2 = prompt_sigma_feats + self.pos_encoding
+        globalfeat2, _ = self.ray_attention(globalfeat2, globalfeat2, globalfeat2)  # [n_rays, n_samples, 16]
+        sigma2 = self.out_geometry_fc(globalfeat2)  # [n_rays, n_samples, 1]
+        out2 = torch.cat([prompt_rgb_feats, sigma2], dim=-1)
+        # print(out1.shape, out2.shape)
+        out = {
+            'out_ibr': out1,
+            'out_prompt': out2
+        }
         return out
