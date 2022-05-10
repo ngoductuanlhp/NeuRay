@@ -290,6 +290,13 @@ class IBRNetWithNeuRay(nn.Module):
             nn.Linear(8, 1),
         )
 
+        self.rgb_final_fc = nn.Sequential(
+            nn.Linear(in_feat_ch+3, 32,),
+            activation_func,
+            nn.Linear(32, 3),
+            nn.Sigmoid()
+        )
+
         self.pos_encoding = self.posenc(d_hid=16, n_samples=self.n_samples)
 
         self.base_fc.apply(weights_init)
@@ -298,6 +305,7 @@ class IBRNetWithNeuRay(nn.Module):
         self.geometry_fc.apply(weights_init)
         self.rgb_fc.apply(weights_init)
         self.neuray_fc.apply(weights_init)
+        self.rgb_final_fc.apply(weights_init)
 
     def change_pos_encoding(self,n_samples):
         self.pos_encoding = self.posenc(16, n_samples=n_samples)
@@ -315,7 +323,7 @@ class IBRNetWithNeuRay(nn.Module):
     def forward(self, rgb_feat, neuray_feat, ray_diff, mask, prompt, mean_hit_prob):
         '''
         :param rgb_feat: rgbs and image features [n_rays, n_samples, n_views, n_feat]
-        :param ray_diff: ray direction difference [n_rays, n_samples, n_views, 4], first 3 channels are directions,
+        :param ray_diff: ray direction difference [n_rays, n_samplesblending_weights_valid, n_views, 4], first 3 channels are directions,
         last channel is inner product
         :param mask: mask for whether each projection is valid or not. [n_rays, n_samples, n_views, 1]
         :return: rgb and density output, [n_rays, n_samples, 4]
@@ -334,8 +342,8 @@ class IBRNetWithNeuRay(nn.Module):
             weight = mask / (torch.sum(mask, dim=2, keepdim=True) + 1e-8)
         
         # prompt feats
-        prompt_rgb_feats = prompt[..., :3].squeeze(0) # [n_rays, n_samples, 3]
-        prompt_sigma_feats = prompt[..., 3:].squeeze(0) # [n_rays, n_samples, 16]
+        prompt_rgb_feats = prompt[..., :35].squeeze(0) # [n_rays, n_samples, 3]
+        prompt_sigma_feats = prompt[..., 35:].squeeze(0) # [n_rays, n_samples, 16]
 
         # neuray layer 0
         weight0 = torch.sigmoid(self.neuray_fc(neuray_feat)) * weight # [rn,dn,rfn,f]
@@ -357,8 +365,10 @@ class IBRNetWithNeuRay(nn.Module):
         globalfeat = torch.cat([mean.squeeze(2), var.squeeze(2), weight.mean(dim=2)], dim=-1)  # [n_rays, n_samples, 32*2+1]
         globalfeat = self.geometry_fc(globalfeat)  # [n_rays, n_samples, 16]
 
-            # NOTE combine
-            # globalfeat = mean_hit_prob * globalfeat + (1. - mean_hit_prob) * prompt_sigma_feats
+        globalfeat_clone = globalfeat.clone().detach()
+
+        # NOTE combine
+        globalfeat = mean_hit_prob * globalfeat + (1. - mean_hit_prob) * prompt_sigma_feats
 
         num_valid_obs = torch.sum(mask, dim=2)
         globalfeat = globalfeat + self.pos_encoding
@@ -375,29 +385,34 @@ class IBRNetWithNeuRay(nn.Module):
         x = x.masked_fill(mask == 0, -1e9)
         blending_weights_valid = F.softmax(x, dim=2)  # color blending
 
-        rgb_out1 = torch.sum(rgb_in*blending_weights_valid, dim=2)
+        # rgb_out1 = torch.sum(rgb_in*blending_weights_valid, dim=2)
+        rgb_feat_blend = torch.sum(rgb_feat * blending_weights_valid, dim=2)
+        # NOTE combine
+        rgb_feat_blend = mean_hit_prob * rgb_feat_blend + (1. - mean_hit_prob) * prompt_rgb_feats
 
-            # # NOTE combine
-            # rgb_out = mean_hit_prob * rgb_out1 + (1. - mean_hit_prob) * prompt_rgb_feats
+
+        rgb_out1 = self.rgb_final_fc(rgb_feat_blend)
+        rgb_feat_blend_clone = rgb_feat_blend.clone().detach()
+        gt_ibr = torch.cat([rgb_feat_blend_clone, globalfeat_clone], axis=-1)
 
         # out = torch.cat([rgb_out, sigma_out1], dim=-1)
 
         # return out
         out1 = torch.cat([rgb_out1, sigma_out1], dim=-1)
-
+        return out1, gt_ibr
 
         
 
 
 
-        # print('promt', prompt_sigma_feats.shape,)
-        globalfeat2 = prompt_sigma_feats + self.pos_encoding
-        globalfeat2, _ = self.ray_attention(globalfeat2, globalfeat2, globalfeat2)  # [n_rays, n_samples, 16]
-        sigma2 = self.out_geometry_fc(globalfeat2)  # [n_rays, n_samples, 1]
-        out2 = torch.cat([prompt_rgb_feats, sigma2], dim=-1)
-        # print(out1.shape, out2.shape)
-        out = {
-            'out_ibr': out1,
-            'out_prompt': out2
-        }
-        return out
+        # # print('promt', prompt_sigma_feats.shape,)
+        # globalfeat2 = prompt_sigma_feats + self.pos_encoding
+        # globalfeat2, _ = self.ray_attention(globalfeat2, globalfeat2, globalfeat2)  # [n_rays, n_samples, 16]
+        # sigma2 = self.out_geometry_fc(globalfeat2)  # [n_rays, n_samples, 1]
+        # out2 = torch.cat([prompt_rgb_feats, sigma2], dim=-1)
+        # # print(out1.shape, out2.shape)
+        # out = {
+        #     'out_ibr': out1,
+        #     'out_prompt': out2
+        # }
+        # return out

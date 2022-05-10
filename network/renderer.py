@@ -154,27 +154,27 @@ class NeuralRayBaseRenderer(nn.Module):
         hit_prob_que = self.predict_self_hit_prob_impl(que_ray_feats, que_depth, que_dists, que_imgs_info['depth_range'], is_fine)
         return hit_prob_que
 
-    def network_rendering(self, prj_dict, que_dir, is_fine, prompt):
-        if is_fine:
-            density, colors, m_hit_prob, out_ibr, out_prompt = self.fine_agg_net(prj_dict, que_dir, prompt)
-        else:
-            density, colors, m_hit_prob, out_ibr, out_prompt = self.agg_net(prj_dict, que_dir, prompt)
-
-        alpha_values = 1.0 - torch.exp(-torch.relu(density))
-        hit_prob = alpha_values2hit_prob(alpha_values)
-        pixel_colors = torch.sum(hit_prob.unsqueeze(-1)*colors,2)
-        return hit_prob, colors, pixel_colors, m_hit_prob, out_ibr, out_prompt
-
     # def network_rendering(self, prj_dict, que_dir, is_fine, prompt):
     #     if is_fine:
-    #         density, colors = self.fine_agg_net(prj_dict, que_dir, prompt)
+    #         density, colors, m_hit_prob, out_ibr, out_prompt = self.fine_agg_net(prj_dict, que_dir, prompt)
     #     else:
-    #         density, colors = self.agg_net(prj_dict, que_dir, prompt)
+    #         density, colors, m_hit_prob, out_ibr, out_prompt = self.agg_net(prj_dict, que_dir, prompt)
 
     #     alpha_values = 1.0 - torch.exp(-torch.relu(density))
     #     hit_prob = alpha_values2hit_prob(alpha_values)
     #     pixel_colors = torch.sum(hit_prob.unsqueeze(-1)*colors,2)
-    #     return hit_prob, colors, pixel_colors
+    #     return hit_prob, colors, pixel_colors, m_hit_prob, out_ibr, out_prompt
+
+    def network_rendering(self, prj_dict, que_dir, is_fine, prompt):
+        if is_fine:
+            density, colors, mean_hit_prob, gt_ibr = self.fine_agg_net(prj_dict, que_dir, prompt)
+        else:
+            density, colors, mean_hit_prob, gt_ibr = self.agg_net(prj_dict, que_dir, prompt)
+
+        alpha_values = 1.0 - torch.exp(-torch.relu(density))
+        hit_prob = alpha_values2hit_prob(alpha_values)
+        pixel_colors = torch.sum(hit_prob.unsqueeze(-1)*colors,2)
+        return hit_prob, colors, pixel_colors, mean_hit_prob, gt_ibr
 
     def compute_prompt_feat(self, que_pts, que_dir, prompt_feats):
         min_range = torch.Tensor([-1, 0, -1]).to(que_pts.device)
@@ -227,11 +227,13 @@ class NeuralRayBaseRenderer(nn.Module):
         prompt = self.compute_prompt_feat(que_pts, que_dir, self.prompt_feats)
         
 
-        hit_prob_nr, colors_nr, pixel_colors_nr, m_hit_prob, out_ibr, out_prompt = self.network_rendering(prj_dict, que_dir, is_fine, prompt)
-        outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr,\
-                'm_hit_prob': m_hit_prob, 'out_ibr': out_ibr, 'out_prompt': out_prompt}
+        # hit_prob_nr, colors_nr, pixel_colors_nr, m_hit_prob, out_ibr, out_prompt = self.network_rendering(prj_dict, que_dir, is_fine, prompt)
+        # outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr,\
+        #         'm_hit_prob': m_hit_prob, 'out_ibr': out_ibr, 'out_prompt': out_prompt}
 
-        # hit_prob_nr, colors_nr, pixel_colors_nr = self.network_rendering(prj_dict, que_dir, is_fine, prompt)
+        hit_prob_nr, colors_nr, pixel_colors_nr, mean_hit_prob, gt_ibr = self.network_rendering(prj_dict, que_dir, is_fine, prompt)
+        outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr,\
+                'm_hit_prob': mean_hit_prob, 'out_ibr': gt_ibr.unsqueeze(0), 'out_prompt': prompt}
         # outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr}
 
         # direct rendering
@@ -297,7 +299,10 @@ class NeuralRayBaseRenderer(nn.Module):
         for ray_id in range(0,ray_num,ray_batch_num):
             que_imgs_info['coords']=coords[:,ray_id:ray_id+ray_batch_num]
             render_info = self.render_impl(que_imgs_info,ref_imgs_info,is_train)
-            output_keys = [k for k in render_info.keys() if is_train or (not k.startswith('hit_prob'))]
+            if is_train:
+                output_keys = [k for k in render_info.keys()]
+            else:
+                output_keys = [k for k in render_info.keys() if (not 'hit_prob' in k) and (not k.startswith('out'))]
             for k in output_keys:
                 v = render_info[k]
                 if k not in render_info_all:
@@ -439,20 +444,20 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         self._initialization()
 
         # after initialization, we check the correctness of rendered images
-        if self.cfg['use_validation'] and self.cfg['validate_initialization']:
-            print('init validation rendering ...')
-            Path(f'data/vis_val/{self.cfg["name"]}').mkdir(exist_ok=True, parents=True)
-            self.eval()
-            self.cuda()
-            for vi in tqdm(range(self.val_num)):
-                outputs = self.validate_step(vi)
-                key_name = 'pixel_colors_nr_fine' if self.cfg['use_hierarchical_sampling'] else 'pixel_colors_nr'
-                img_gt = self.val_imgs_info['imgs'][vi] # 3,h,w
-                _, h, w = img_gt.shape
-                img_gt = color_map_backward(img_gt.permute(1,2,0).numpy())
-                rgb_pr = outputs[key_name].reshape(h, w, 3).cpu().numpy()
-                img_pr = color_map_backward(rgb_pr)
-                imsave(f'data/vis_val/{self.cfg["name"]}/init-{vi}.jpg',concat_images_list(img_gt,img_pr))
+        # if self.cfg['use_validation'] and self.cfg['validate_initialization']:
+        #     print('init validation rendering ...')
+        #     Path(f'data/vis_val/{self.cfg["name"]}').mkdir(exist_ok=True, parents=True)
+        #     self.eval()
+        #     self.cuda()
+        #     for vi in tqdm(range(self.val_num)):
+        #         outputs = self.validate_step(vi)
+        #         key_name = 'pixel_colors_nr_fine' if self.cfg['use_hierarchical_sampling'] else 'pixel_colors_nr'
+        #         img_gt = self.val_imgs_info['imgs'][vi] # 3,h,w
+        #         _, h, w = img_gt.shape
+        #         img_gt = color_map_backward(img_gt.permute(1,2,0).numpy())
+        #         rgb_pr = outputs[key_name].reshape(h, w, 3).cpu().numpy()
+        #         img_pr = color_map_backward(rgb_pr)
+        #         imsave(f'data/vis_val/{self.cfg["name"]}/init-{vi}.jpg',concat_images_list(img_gt,img_pr))
 
     def _init_by_depth(self, ref_id, init_net):
         # init by depth
@@ -493,7 +498,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         self.prompt_feats = nn.ParameterDict()
         for i in range(3):
             # self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 3 + 16, 128, 1]))
-            self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 3+16, 128, 1]))
+            self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 35+16, 128, 1]))
         # self.bm_rgb = nn.Linear(64+3+3, 3, bias=False)
         # self.bm_sig = nn.Linear(64+3, 16, bias=False)
 
@@ -504,7 +509,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
             name = gen_cfg['name']
             ckpt = torch.load(f'data/model/{name}/model_best.pth')
             gen_renderer = NeuralRayGenRenderer(gen_cfg).cuda()
-            gen_renderer.load_state_dict(ckpt['network_state_dict'])
+            gen_renderer.load_state_dict(ckpt['network_state_dict'], strict=False)
             gen_renderer = gen_renderer.eval()
 
             # init from generalization model

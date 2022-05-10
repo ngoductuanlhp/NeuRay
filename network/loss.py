@@ -22,14 +22,17 @@ class PromptLoss(Loss):
         super().__init__([f'loss_prompt'])
 
     def __call__(self, data_pr, data_gt, step, **kwargs):
-        if 'out_prompt' not in data_pr: {'loss_prompt': torch.Tensor([0.])}
+        if 'out_prompt' not in data_pr: 
+            return {'loss_prompt': torch.Tensor([0.])}
 
         m_hit_prob = data_pr['m_hit_prob']
-        m_hit_prob_mask = (m_hit_prob >= 0.5).detach()
+        m_hit_prob_mask = (m_hit_prob >= 0.2).detach()
         if torch.count_nonzero(m_hit_prob_mask) == 0:
             return {'loss_prompt': torch.Tensor([0.])}
         out_ibr = data_pr['out_ibr'][m_hit_prob_mask.repeat(1,1,1,data_pr['out_ibr'].shape[-1])].detach()
         out_prompt = data_pr['out_prompt'][m_hit_prob_mask.repeat(1,1,1,data_pr['out_prompt'].shape[-1])]
+
+        # print('debug shape', data_pr['out_ibr'].shape, data_pr['out_prompt'].shape)
         loss_prompt = torch.mean((out_prompt - out_ibr)**2) * 1e-4
         outputs = {'loss_prompt': loss_prompt}
         return outputs
