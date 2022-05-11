@@ -330,9 +330,30 @@ class IBRNetWithNeuRay(nn.Module):
         '''
 
         num_views = rgb_feat.shape[2]
+
+
+        # rgb_feat: [n_rays, n_samples, n_views, n_feat] 
+        rgb_feat1 = rgb_feat[:, :, :, None, :].repeat(1,1,1,num_views,1)  # [n_rays, n_samples, n_views, n_views, n_feat]
+        rgb_feat2 = rgb_feat[:, :, None, :, :].repeat(1,1,num_views,1,1)  # [n_rays, n_samples, n_views, n_views, n_feat]
+
+        # rgb_feat_mat = rgb_feat1 *rgb_feat2
+        rgb_feat_sum = torch.sum(rgb_feat1 * rgb_feat2, dim =-1)
+        # rgb_feat_sum = F.cosine_similarity(rgb_feat1, rgb_feat2, dim=-1)
+        mask_rgb_feat_sum = torch.eye(num_views)[None, None, ...].type(torch.bool).to(rgb_feat_sum.device).repeat(rgb_feat_sum.shape[0], rgb_feat_sum.shape[1], 1, 1)
+        rgb_feat_sum[mask_rgb_feat_sum] = -1e8
+        rgb_feat_exp = torch.exp(rgb_feat_sum) # [n_rays, n_samples, n_views, n_views]
+        
+
+        rgb_feat_exp_mean_row = torch.mean(rgb_feat_exp, dim=3) # [n_rays, n_samples, n_views]
+        # rgb_feat_exp_sum_total = torch.sum(rgb_feat_exp_sum_row, dim=2, keepdim=True) # # [n_rays, n_samples]
+        # weights = rgb_feat_exp_sum_row / rgb_feat_exp_sum_total # # [n_rays, n_samples, n_views]
+        rgb_feat_exp_mean_total = torch.mean(rgb_feat_exp_mean_row, dim=2)
+        # print('rgb_feat_exp_sum_total', torch.mean(rgb_feat_exp_mean_total), torch.median(rgb_feat_exp_mean_total), torch.min(rgb_feat_exp_mean_total), torch.max(rgb_feat_exp_mean_total))
+
         direction_feat = self.ray_dir_fc(ray_diff)
         rgb_in = rgb_feat[..., :3]
         rgb_feat = rgb_feat + direction_feat
+
         if self.anti_alias_pooling:
             _, dot_prod = torch.split(ray_diff, [3, 1], dim=-1)
             exp_dot_prod = torch.exp(torch.abs(self.s) * (dot_prod - 1))
@@ -342,8 +363,8 @@ class IBRNetWithNeuRay(nn.Module):
             weight = mask / (torch.sum(mask, dim=2, keepdim=True) + 1e-8)
         
         # prompt feats
-        prompt_rgb_feats = prompt[..., :35].squeeze(0) # [n_rays, n_samples, 3]
-        prompt_sigma_feats = prompt[..., 35:].squeeze(0) # [n_rays, n_samples, 16]
+        # prompt_rgb_feats = prompt[..., :35].squeeze(0) # [n_rays, n_samples, 3]
+        # prompt_sigma_feats = prompt[..., 35:].squeeze(0) # [n_rays, n_samples, 16]
         # prompt_sigma_feats = prompt.squeeze(0)
 
         # neuray layer 0
@@ -368,8 +389,10 @@ class IBRNetWithNeuRay(nn.Module):
 
         globalfeat_clone = globalfeat.clone().detach()
 
-        # NOTE combine
-        globalfeat = mean_hit_prob * globalfeat + (1. - mean_hit_prob) * prompt_sigma_feats
+        # NOTE combine weights
+        # globalfeat = weights * globalfeat + (1. - weights) * prompt_sigma_feats
+        # globalfeat = mean_hit_prob * globalfeat + (1. - mean_hit_prob) * prompt_sigma_feats
+        # globalfeat = prompt_sigma_feats
 
         num_valid_obs = torch.sum(mask, dim=2)
         globalfeat = globalfeat + self.pos_encoding
@@ -380,21 +403,25 @@ class IBRNetWithNeuRay(nn.Module):
         sigma = self.out_geometry_fc(globalfeat)  # [n_rays, n_samples, 1]
         sigma_out1 = sigma.masked_fill(num_valid_obs < 1, 0.)  # set the sigma of invalid point to zero
 
+        # NOTE mask 
+        # breakpoint()
+        sigma_out1 = sigma_out1.masked_fill(rgb_feat_exp_mean_total[..., None] < 5, 0.)  # set the sigma of invalid point to zero
+
         # rgb computation
         x = torch.cat([x, vis, ray_diff], dim=-1)
         x = self.rgb_fc(x)
         x = x.masked_fill(mask == 0, -1e9)
         blending_weights_valid = F.softmax(x, dim=2)  # color blending
 
-        # rgb_out1 = torch.sum(rgb_in*blending_weights_valid, dim=2)
-        rgb_feat_blend = torch.sum(rgb_feat * blending_weights_valid, dim=2)
+        rgb_out1 = torch.sum(rgb_in*blending_weights_valid, dim=2)
+        # rgb_feat_blend = torch.sum(rgb_feat * blending_weights_valid, dim=2)
         # NOTE combine
-        rgb_feat_blend = mean_hit_prob * rgb_feat_blend + (1. - mean_hit_prob) * prompt_rgb_feats
+        # rgb_feat_blend = mean_hit_prob * rgb_feat_blend + (1. - mean_hit_prob) * prompt_rgb_feats
 
 
-        rgb_out1 = self.rgb_final_fc(rgb_feat_blend)
-        rgb_feat_blend_clone = rgb_feat_blend.clone().detach()
-        gt_ibr = torch.cat([rgb_feat_blend_clone, globalfeat_clone], axis=-1)
+        # rgb_out1 = self.rgb_final_fc(rgb_feat_blend)
+        # rgb_feat_blend_clone = rgb_feat_blend.clone().detach()
+        # gt_ibr = torch.cat([rgb_feat_blend_clone, globalfeat_clone], axis=-1)
         gt_ibr = globalfeat_clone
 
         # out = torch.cat([rgb_out, sigma_out1], dim=-1)
