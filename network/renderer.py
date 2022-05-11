@@ -498,7 +498,8 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         self.prompt_feats = nn.ParameterDict()
         for i in range(3):
             # self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 3 + 16, 128, 1]))
-            self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 35+16, 128, 1]))
+            # self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 35+16, 128, 1]))
+            self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 16, 128, 1]))
         # self.bm_rgb = nn.Linear(64+3+3, 3, bias=False)
         # self.bm_sig = nn.Linear(64+3, 16, bias=False)
 

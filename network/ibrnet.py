@@ -290,12 +290,12 @@ class IBRNetWithNeuRay(nn.Module):
             nn.Linear(8, 1),
         )
 
-        self.rgb_final_fc = nn.Sequential(
-            nn.Linear(in_feat_ch+3, 32,),
-            activation_func,
-            nn.Linear(32, 3),
-            nn.Sigmoid()
-        )
+        # self.rgb_final_fc = nn.Sequential(
+        #     nn.Linear(in_feat_ch+3, 32,),
+        #     activation_func,
+        #     nn.Linear(32, 3),
+        #     nn.Sigmoid()
+        # )
 
         self.pos_encoding = self.posenc(d_hid=16, n_samples=self.n_samples)
 
@@ -305,7 +305,7 @@ class IBRNetWithNeuRay(nn.Module):
         self.geometry_fc.apply(weights_init)
         self.rgb_fc.apply(weights_init)
         self.neuray_fc.apply(weights_init)
-        self.rgb_final_fc.apply(weights_init)
+        # self.rgb_final_fc.apply(weights_init)
 
     def change_pos_encoding(self,n_samples):
         self.pos_encoding = self.posenc(16, n_samples=n_samples)
@@ -344,6 +344,7 @@ class IBRNetWithNeuRay(nn.Module):
         # prompt feats
         prompt_rgb_feats = prompt[..., :35].squeeze(0) # [n_rays, n_samples, 3]
         prompt_sigma_feats = prompt[..., 35:].squeeze(0) # [n_rays, n_samples, 16]
+        # prompt_sigma_feats = prompt.squeeze(0)
 
         # neuray layer 0
         weight0 = torch.sigmoid(self.neuray_fc(neuray_feat)) * weight # [rn,dn,rfn,f]
@@ -394,6 +395,7 @@ class IBRNetWithNeuRay(nn.Module):
         rgb_out1 = self.rgb_final_fc(rgb_feat_blend)
         rgb_feat_blend_clone = rgb_feat_blend.clone().detach()
         gt_ibr = torch.cat([rgb_feat_blend_clone, globalfeat_clone], axis=-1)
+        gt_ibr = globalfeat_clone
 
         # out = torch.cat([rgb_out, sigma_out1], dim=-1)
 
