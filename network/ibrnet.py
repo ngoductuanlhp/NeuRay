@@ -344,11 +344,13 @@ class IBRNetWithNeuRay(nn.Module):
         rgb_feat_exp = torch.exp(rgb_feat_sum) # [n_rays, n_samples, n_views, n_views]
         
 
-        rgb_feat_exp_mean_row = torch.mean(rgb_feat_exp, dim=3) # [n_rays, n_samples, n_views]
-        # rgb_feat_exp_sum_total = torch.sum(rgb_feat_exp_sum_row, dim=2, keepdim=True) # # [n_rays, n_samples]
-        # weights = rgb_feat_exp_sum_row / rgb_feat_exp_sum_total # # [n_rays, n_samples, n_views]
-        rgb_feat_exp_mean_total = torch.mean(rgb_feat_exp_mean_row, dim=2)
-        # print('rgb_feat_exp_sum_total', torch.mean(rgb_feat_exp_mean_total), torch.median(rgb_feat_exp_mean_total), torch.min(rgb_feat_exp_mean_total), torch.max(rgb_feat_exp_mean_total))
+        # rgb_feat_exp_mean_row = torch.mean(rgb_feat_exp, dim=3) # [n_rays, n_samples, n_views]
+        # rgb_feat_exp_mean_total = torch.mean(rgb_feat_exp_mean_row, dim=2)
+        rgb_feat_exp_sum_row = torch.sum(rgb_feat_exp, dim=3)
+        rgb_feat_exp_sum_total = torch.sum(rgb_feat_exp_sum_row, dim=2)
+        rgb_feat_exp_sum_total = F.tanh(rgb_feat_exp_sum_total) # 0->1
+
+        assert torch.all(rgb_feat_exp_sum_total >=0) and torch.all(rgb_feat_exp_sum_total <= 1)
 
         direction_feat = self.ray_dir_fc(ray_diff)
         rgb_in = rgb_feat[..., :3]
@@ -365,7 +367,7 @@ class IBRNetWithNeuRay(nn.Module):
         # prompt feats
         # prompt_rgb_feats = prompt[..., :35].squeeze(0) # [n_rays, n_samples, 3]
         # prompt_sigma_feats = prompt[..., 35:].squeeze(0) # [n_rays, n_samples, 16]
-        # prompt_sigma_feats = prompt.squeeze(0)
+        prompt_sigma_feats = prompt.squeeze(0)
 
         # neuray layer 0
         weight0 = torch.sigmoid(self.neuray_fc(neuray_feat)) * weight # [rn,dn,rfn,f]
@@ -390,7 +392,7 @@ class IBRNetWithNeuRay(nn.Module):
         globalfeat_clone = globalfeat.clone().detach()
 
         # NOTE combine weights
-        # globalfeat = weights * globalfeat + (1. - weights) * prompt_sigma_feats
+        globalfeat = rgb_feat_exp_sum_total.unsqueeze(-1) * globalfeat + (1. - rgb_feat_exp_sum_total.unsqueeze(-1)) * prompt_sigma_feats
         # globalfeat = mean_hit_prob * globalfeat + (1. - mean_hit_prob) * prompt_sigma_feats
         # globalfeat = prompt_sigma_feats
 
@@ -403,9 +405,8 @@ class IBRNetWithNeuRay(nn.Module):
         sigma = self.out_geometry_fc(globalfeat)  # [n_rays, n_samples, 1]
         sigma_out1 = sigma.masked_fill(num_valid_obs < 1, 0.)  # set the sigma of invalid point to zero
 
-        # NOTE mask 
-        # breakpoint()
-        sigma_out1 = sigma_out1.masked_fill(rgb_feat_exp_mean_total[..., None] < 5, 0.)  # set the sigma of invalid point to zero
+        # NOTE mask low consistent point by 0
+        sigma_out1 = sigma_out1.masked_fill(rgb_feat_exp_sum_total[..., None] < 0.2, 0.)  # set the sigma of invalid point to zero
 
         # rgb computation
         x = torch.cat([x, vis, ray_diff], dim=-1)
@@ -429,19 +430,3 @@ class IBRNetWithNeuRay(nn.Module):
         # return out
         out1 = torch.cat([rgb_out1, sigma_out1], dim=-1)
         return out1, gt_ibr
-
-        
-
-
-
-        # # print('promt', prompt_sigma_feats.shape,)
-        # globalfeat2 = prompt_sigma_feats + self.pos_encoding
-        # globalfeat2, _ = self.ray_attention(globalfeat2, globalfeat2, globalfeat2)  # [n_rays, n_samples, 16]
-        # sigma2 = self.out_geometry_fc(globalfeat2)  # [n_rays, n_samples, 1]
-        # out2 = torch.cat([prompt_rgb_feats, sigma2], dim=-1)
-        # # print(out1.shape, out2.shape)
-        # out = {
-        #     'out_ibr': out1,
-        #     'out_prompt': out2
-        # }
-        # return out
