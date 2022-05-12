@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from easydict import EasyDict
 
-from network.ibrnet import IBRNetWithNeuRay
+from network.ibrnet import IBRNetWithNeuRay, IBRNetWithNeuRay2
 
 
 def get_dir_diff(prj_dir,que_dir):
@@ -19,12 +19,15 @@ class DefaultAggregationNet(nn.Module):
         'neuray_dim': 32,
         'use_img_feats': False,
     }
-    def __init__(self,cfg):
+    def __init__(self, cfg):
         super().__init__()
         self.cfg={**self.default_cfg, **cfg}
         # args = EasyDict(anti_alias_pooling=False,local_rank=0)
         dim = self.cfg['neuray_dim']
-        self.agg_impl = IBRNetWithNeuRay(dim,n_samples=self.cfg['sample_num'])
+
+        # self.agg_impl = IBRNetWithNeuRay(dim,n_samples=self.cfg['sample_num'])
+
+        self.agg_impl = IBRNetWithNeuRay2(dim,n_samples=self.cfg['sample_num'])
         self.prob_embed = nn.Sequential(
             nn.Linear(2+32, dim),
             nn.ReLU(),
