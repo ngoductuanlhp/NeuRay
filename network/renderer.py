@@ -167,14 +167,15 @@ class NeuralRayBaseRenderer(nn.Module):
 
     def network_rendering(self, prj_dict, que_dir, is_fine, prompt):
         if is_fine:
-            density, colors, mean_hit_prob, gt_ibr = self.fine_agg_net(prj_dict, que_dir, prompt)
+            density, colors, mean_hit_prob, gt_ibr, consistent_weights = self.fine_agg_net(prj_dict, que_dir, prompt)
         else:
-            density, colors, mean_hit_prob, gt_ibr = self.agg_net(prj_dict, que_dir, prompt)
+            density, colors, mean_hit_prob, gt_ibr, consistent_weights = self.agg_net(prj_dict, que_dir, prompt)
 
         alpha_values = 1.0 - torch.exp(-torch.relu(density))
         hit_prob = alpha_values2hit_prob(alpha_values)
         pixel_colors = torch.sum(hit_prob.unsqueeze(-1)*colors,2)
-        return hit_prob, colors, pixel_colors, mean_hit_prob, gt_ibr
+        # breakpoint()
+        return hit_prob, colors, pixel_colors, alpha_values, mean_hit_prob, gt_ibr, consistent_weights
 
     def compute_prompt_feat(self, que_pts, que_dir, prompt_feats):
         min_range = torch.Tensor([-1, 0, -1]).to(que_pts.device)
@@ -200,6 +201,9 @@ class NeuralRayBaseRenderer(nn.Module):
         
         line_coef_point = line_coef_point * F.grid_sample(prompt_feats['2'], coordinate_line[[2]],
                                         align_corners=True).view(-1,*que_pts_flatten.shape[:1]) # (channel_dim, N_Sample)
+
+        # NOTE single scalar prompt for sigma
+        line_coef_point = torch.sum(line_coef_point, dim=0, keepdim=True)
         line_coef_point = line_coef_point.T.reshape(qn, rn, dn, -1)
 
         return line_coef_point
@@ -231,9 +235,13 @@ class NeuralRayBaseRenderer(nn.Module):
         # outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr,\
         #         'm_hit_prob': m_hit_prob, 'out_ibr': out_ibr, 'out_prompt': out_prompt}
 
-        hit_prob_nr, colors_nr, pixel_colors_nr, mean_hit_prob, gt_ibr = self.network_rendering(prj_dict, que_dir, is_fine, prompt)
-        outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr,\
+        hit_prob_nr, colors_nr, pixel_colors_nr, alpha_values, mean_hit_prob, gt_ibr, consistent_weights = self.network_rendering(prj_dict, que_dir, is_fine, prompt)
+        outputs = {'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr,\
                 'm_hit_prob': mean_hit_prob, 'out_ibr': gt_ibr.unsqueeze(0), 'out_prompt': prompt}
+
+        # NOTE add prompt params
+        outputs['alpha_values'] = alpha_values
+        outputs['consistent_weights'] = consistent_weights
         # outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr}
 
         # direct rendering
@@ -499,7 +507,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         for i in range(3):
             # self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 3 + 16, 128, 1]))
             # self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 35+16, 128, 1]))
-            self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 16, 128, 1]))
+            self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 50, 128, 1]))
         # self.bm_rgb = nn.Linear(64+3+3, 3, bias=False)
         # self.bm_sig = nn.Linear(64+3, 16, bias=False)
 
@@ -585,6 +593,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         # render
         render_outputs = self.render(que_imgs_info.copy(), ref_imgs_info.copy(), True)
 
+        render_outputs['prompt_feats'] = self.prompt_feats
         # clear some values for outputs
         ref_imgs_info.pop('ray_feats')
         que_imgs_info.pop('ray_feats')

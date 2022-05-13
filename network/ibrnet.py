@@ -392,7 +392,7 @@ class IBRNetWithNeuRay(nn.Module):
         globalfeat_clone = globalfeat.clone().detach()
 
         # NOTE combine weights
-        globalfeat = rgb_feat_exp_sum_total.unsqueeze(-1) * globalfeat + (1. - rgb_feat_exp_sum_total.unsqueeze(-1)) * prompt_sigma_feats
+        # globalfeat = rgb_feat_exp_sum_total.unsqueeze(-1) * globalfeat + (1. - rgb_feat_exp_sum_total.unsqueeze(-1)) * prompt_sigma_feats
         # globalfeat = mean_hit_prob * globalfeat + (1. - mean_hit_prob) * prompt_sigma_feats
         # globalfeat = prompt_sigma_feats
 
@@ -403,10 +403,14 @@ class IBRNetWithNeuRay(nn.Module):
         globalfeat, _ = self.ray_attention(globalfeat, globalfeat, globalfeat,
                                            mask=(num_valid_obs > 1).float())  # [n_rays, n_samples, 16]
         sigma = self.out_geometry_fc(globalfeat)  # [n_rays, n_samples, 1]
+
+        # NOTE blend sigma
+        sigma = rgb_feat_exp_sum_total.unsqueeze(-1) * sigma + (1. - rgb_feat_exp_sum_total.unsqueeze(-1)) * prompt_sigma_feats
+
         sigma_out1 = sigma.masked_fill(num_valid_obs < 1, 0.)  # set the sigma of invalid point to zero
 
-        # NOTE mask low consistent point by 0
-        sigma_out1 = sigma_out1.masked_fill(rgb_feat_exp_sum_total[..., None] < 0.2, 0.)  # set the sigma of invalid point to zero
+        # # NOTE mask low consistent point by 0
+        # sigma_out1 = sigma_out1.masked_fill(rgb_feat_exp_sum_total[..., None] < 0.2, 0.)  # set the sigma of invalid point to zero
 
         # rgb computation
         x = torch.cat([x, vis, ray_diff], dim=-1)
@@ -429,4 +433,6 @@ class IBRNetWithNeuRay(nn.Module):
 
         # return out
         out1 = torch.cat([rgb_out1, sigma_out1], dim=-1)
-        return out1, gt_ibr
+
+        consistent_weights = rgb_feat_exp_sum_total
+        return out1, gt_ibr, consistent_weights

@@ -72,7 +72,7 @@ class DefaultAggregationNet(nn.Module):
         # FIXME hardcode
         # mean_hit_prob = torch.exp(-(1 - mean_hit_prob))
 
-        outs, gt_ibr = self.agg_impl(prj_img_feats, prob_embedding, dir_diff, valid_mask, prompt, mean_hit_prob)
+        outs, gt_ibr, consistent_weights = self.agg_impl(prj_img_feats, prob_embedding, dir_diff, valid_mask, prompt, mean_hit_prob)
 
         
             # # print('mean_hit_prob', mean_hit_prob.shape)
@@ -84,7 +84,7 @@ class DefaultAggregationNet(nn.Module):
             # return density_mix.reshape(qn,rn,dn), colors_mix.reshape(qn,rn,dn,3), mean_hit_prob.reshape(qn,rn,dn,1), outs['out_ibr'].reshape(qn,rn,dn,4), outs['out_prompt'].reshape(qn,rn,dn,4)
         colors = outs[...,:3] # qn*rn,dn,3
         density = outs[...,3] # qn*rn,dn,0
-        return density.reshape(qn,rn,dn), colors.reshape(qn,rn,dn,3), mean_hit_prob, gt_ibr
+        return density.reshape(qn,rn,dn), colors.reshape(qn,rn,dn,3), mean_hit_prob, gt_ibr, consistent_weights.reshape(qn,rn,dn)
 
 
 name2agg_net={

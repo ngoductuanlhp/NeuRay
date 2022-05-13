@@ -37,6 +37,43 @@ class PromptLoss(Loss):
         outputs = {'loss_prompt': loss_prompt}
         return outputs
 
+class ConsistentPromptLoss(Loss):
+    default_cfg={}
+    def __init__(self, cfg):
+        self.cfg={**self.default_cfg,**cfg}
+        super().__init__([f'loss_consistent_prompt'])
+
+    def __call__(self, data_pr, data_gt, step, **kwargs):
+        if 'consistent_weights' not in data_pr: 
+            return {'loss_consistent_prompt': torch.Tensor([0.])}
+
+        consistent_weights = data_pr['consistent_weights']
+        alpha_values = data_pr['alpha_values']
+
+        mask = (consistent_weights > 0.5)
+        loss = torch.mean( consistent_weights[mask] * (1 - alpha_values[mask])) * 1e-1
+        outputs = {'loss_consistent_prompt': loss}
+        return outputs
+
+class SmoothPromptLoss(Loss):
+    default_cfg={}
+    def __init__(self, cfg):
+        self.cfg={**self.default_cfg,**cfg}
+        super().__init__([f'loss_smooth_prompt'])
+
+    def __call__(self, data_pr, data_gt, step, **kwargs):
+        if 'prompt_feats' not in data_pr: 
+            return {'loss_smooth_prompt': torch.Tensor([0.])}
+
+        prompt_feats = data_pr['prompt_feats']
+
+        loss = 0
+        for k in prompt_feats.keys():
+            # loss += self.compute_loss(feat_line)*1e-3
+            loss += torch.mean((prompt_feats[k][:,:,1:,:] - prompt_feats[k][:,:,:-1,:])**2)*1e-3
+        outputs = {'loss_smooth_prompt': loss}
+        return outputs
+
 class ConsistencyLoss(Loss):
     default_cfg={
         'use_ray_mask': False,
@@ -158,4 +195,6 @@ name2loss={
     'depth': DepthLoss,
     'consist': ConsistencyLoss,
     'prompt': PromptLoss,
+    'smooth_prompt': SmoothPromptLoss,
+    'consistent_prompt': ConsistentPromptLoss,
 }

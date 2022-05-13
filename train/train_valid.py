@@ -38,7 +38,7 @@ class ValidationEvaluator:
                 for loss in losses:
                     loss_results=loss(outputs, data, step, data_index=data_i, model_name=model_name)
                     for k,v in loss_results.items():
-                        if k == 'loss_prompt':
+                        if k in ['loss_prompt', 'loss_consistent_prompt', 'loss_smooth_prompt'] :
                             continue
                         if type(v)==torch.Tensor:
                             v=v.detach().cpu().numpy()

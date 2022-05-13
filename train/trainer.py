@@ -130,7 +130,7 @@ class Trainer:
             for k,v in log_info.items():
                 if k.startswith('loss'):
                     loss=loss+torch.mean(v)
-            # print('loss prompt', log_info['loss_prompt'])
+            # print('loss_consistent_prompt', log_info['loss_consistent_prompt'])
             loss.backward()
             self.optimizer.step()
             if ((step+1) % self.cfg['train_log_step']) == 0:
