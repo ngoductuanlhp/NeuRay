@@ -348,7 +348,7 @@ class IBRNetWithNeuRay(nn.Module):
         #rgb_feat_exp_sum_total = torch.sum(rgb_feat_exp_sum_row, dim=2)
         # rgb_feat_max = torch.max(rgb_feat_sum,dim=[2,3])[0]
         rgb_feat_max = torch.max(rgb_feat_sum.reshape(rgb_feat_sum.shape[0], rgb_feat_sum.shape[1], -1),dim =-1 )[0]
-        rgb_feat_max = (rgb_feat_max + 1) / 2
+        # rgb_feat_max = (rgb_feat_max + 1) / 2
         # rgb_feat_max = F.sigmoid(rgb_feat_max) # 0->1
 
         rgb_feat_exp_sum_total = rgb_feat_max
@@ -411,22 +411,22 @@ class IBRNetWithNeuRay(nn.Module):
 
         globalfeat_clone = globalfeat.clone().detach()
 
-        # NOTE combine weights
-        # globalfeat = rgb_feat_exp_sum_total.unsqueeze(-1) * globalfeat + (1. - rgb_feat_exp_sum_total.unsqueeze(-1)) * prompt_sigma_feats
-        # globalfeat = mean_hit_prob * globalfeat + (1. - mean_hit_prob) * prompt_sigma_feats
-        # globalfeat = prompt_sigma_feats
+            # NOTE combine weights
+            # globalfeat = rgb_feat_exp_sum_total.unsqueeze(-1) * globalfeat + (1. - rgb_feat_exp_sum_total.unsqueeze(-1)) * prompt_sigma_feats
+            # globalfeat = mean_hit_prob * globalfeat + (1. - mean_hit_prob) * prompt_sigma_feats
+            # globalfeat = prompt_sigma_feats
 
         num_valid_obs = torch.sum(mask, dim=2)
-        # globalfeat = globalfeat + self.pos_encoding
+        globalfeat = globalfeat + self.pos_encoding
 
-        # # print('ibr', globalfeat.shape, self.pos_encoding.shape)
-        # globalfeat, _ = self.ray_attention(globalfeat, globalfeat, globalfeat,
-        #                                    mask=(num_valid_obs > 1).float())  # [n_rays, n_samples, 16]
-        # sigma = self.out_geometry_fc(globalfeat)  # [n_rays, n_samples, 1]
+        # print('ibr', globalfeat.shape, self.pos_encoding.shape)
+        globalfeat, _ = self.ray_attention(globalfeat, globalfeat, globalfeat,
+                                           mask=(num_valid_obs > 1).float())  # [n_rays, n_samples, 16]
+        sigma = self.out_geometry_fc(globalfeat)  # [n_rays, n_samples, 1]
 
         # # NOTE blend sigma
-        # sigma = rgb_feat_exp_sum_total.unsqueeze(-1) * sigma + (1. - rgb_feat_exp_sum_total.unsqueeze(-1)) * prompt_sigma_feats
-        sigma = prompt_sigma_feats
+        sigma = rgb_feat_exp_sum_total.unsqueeze(-1) * sigma + (1. - rgb_feat_exp_sum_total.unsqueeze(-1)) * prompt_sigma_feats
+        # sigma = prompt_sigma_feats
         sigma_out1 = sigma.masked_fill(num_valid_obs < 1, 0.)  # set the sigma of invalid point to zero
 
         # # NOTE mask low consistent point by 0

@@ -227,7 +227,7 @@ class TVFullPromptLoss(Loss):
         outputs = {
             'loss_tv_full_prompt': torch.mean(loss) * 1e-1
         }
-
+        # print('outputs', outputs)
         return outputs
 
 
