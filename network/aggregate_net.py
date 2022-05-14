@@ -84,8 +84,8 @@ class DefaultAggregationNet(nn.Module):
             # return density_mix.reshape(qn,rn,dn), colors_mix.reshape(qn,rn,dn,3), mean_hit_prob.reshape(qn,rn,dn,1), outs['out_ibr'].reshape(qn,rn,dn,4), outs['out_prompt'].reshape(qn,rn,dn,4)
         colors = outs[...,:3] # qn*rn,dn,3
         density = outs[...,3] # qn*rn,dn,0
+        # return density.reshape(qn,rn,dn), colors.reshape(qn,rn,dn,3), mean_hit_prob, gt_ibr, consistent_weights.reshape(qn,rn,dn), rgb_feat_sum.reshape(qn,rn,dn, 7,7)
         return density.reshape(qn,rn,dn), colors.reshape(qn,rn,dn,3), mean_hit_prob, gt_ibr, consistent_weights.reshape(qn,rn,dn)
-
 
 name2agg_net={
     'default': DefaultAggregationNet

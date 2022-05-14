@@ -242,6 +242,15 @@ class NeuralRayBaseRenderer(nn.Module):
         # NOTE add prompt params
         outputs['alpha_values'] = alpha_values
         outputs['consistent_weights'] = consistent_weights
+        outputs['que_depth'] = que_depth
+        # outputs['rgb_feat_sum'] = rgb_feat_sum
+        # hit_prob_consist = alpha_values2hit_prob(consistent_weights)
+        # outputs['render_depth_consistent'] = torch.sum(hit_prob_consist * que_depth, -1) # qn,rn
+        # max_weight_inds = torch.max(consistent_weights, dim=-1)[1]
+
+        # breakpoint()
+        # outputs['render_depth_consistent'] = torch.gather(que_depth, 2, max_weight_inds.unsqueeze(-1)).squeeze(-1)
+        # print('render_depth_consistent', outputs['render_depth_consistent'].shape, torch.mean(outputs['render_depth_consistent']), torch.max(outputs['render_depth_consistent']), torch.min(outputs['render_depth_consistent']))
         # outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr}
 
         # direct rendering
@@ -266,6 +275,8 @@ class NeuralRayBaseRenderer(nn.Module):
         if self.cfg['render_depth']:
             # qn,rn,dn
             outputs['render_depth'] = torch.sum(hit_prob_nr * que_depth, -1) # qn,rn
+            # print('render_depth', outputs['render_depth'].shape, torch.mean(outputs['render_depth']), torch.max(outputs['render_depth']), torch.min(outputs['render_depth']))
+
         return outputs
 
     def fine_render_impl(self, coarse_render_info, que_imgs_info, ref_imgs_info, is_train):
@@ -444,7 +455,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
 
         if self.cfg['use_validation']:
             self.val_dist_idx = compute_nearest_camera_indices(self.database, self.val_ids, self.ref_ids)
-            val_imgs_info = build_imgs_info(self.database, self.val_ids, -1, True, has_depth=False)
+            val_imgs_info = build_imgs_info(self.database, self.val_ids, -1, True, has_depth=True)
             self.val_imgs_info = imgs_info_to_torch(val_imgs_info)
             self.val_num = len(self.val_ids)
 

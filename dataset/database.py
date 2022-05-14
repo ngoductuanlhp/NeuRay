@@ -20,6 +20,13 @@ from utils.llff_utils import load_llff_data
 from utils.real_estate_utils import parse_pose_file, unnormalize_intrinsics
 from utils.space_dataset_utils import ReadScene
 
+def read_depth(filename):
+    depth_h = np.array(read_pfm(filename)[0], dtype=np.float32)
+    depth_h = cv2.resize(depth_h, None, fx=0.5, fy=0.5,
+                            interpolation=cv2.INTER_NEAREST)  # (600, 800)
+    depth_h = depth_h[44:556, 80:720]
+
+    return depth_h
 
 class BaseDatabase(abc.ABC):
     def __init__(self, database_name):
@@ -363,15 +370,10 @@ class DTUMVSTestSparseDatabase(BaseDatabase):
         return os.path.exists(fn)
 
     def get_depth(self, img_id):
-        if img_id in self.img_id2depth:
-            return self.img_id2depth[img_id]
-
-        depth = np.zeros([self.h, self.w], dtype=np.float32)
-        depth=np.ascontiguousarray(depth, dtype=np.float32)
-        if self.w != 800: depth = cv2.resize(depth, (self.w,self.h), interpolation=cv2.INTER_NEAREST)
-        depth[~self.get_mask(img_id)] = 0
-        self.img_id2depth[img_id] = depth
-        return depth
+        depth_filename = os.path.join(self.root_dir, f'Depths_raw/{self.model_name}/depth_map_{img_id:04d}.pfm')
+        depth_map = read_depth(depth_filename) * self.scale_factor
+        self.img_id2depth[img_id] = depth_map
+        return depth_map
         
 
         # fn = f'{self.root_dir}/colmap_depth/{img_id}.jpg.geometric.bin'
@@ -387,13 +389,7 @@ class DTUMVSTestSparseDatabase(BaseDatabase):
         #     raise NotImplementedError
 
     def get_mask(self, img_id):
-        def read_depth(filename):
-            depth_h = np.array(read_pfm(filename)[0], dtype=np.float32)
-            depth_h = cv2.resize(depth_h, None, fx=0.5, fy=0.5,
-                                    interpolation=cv2.INTER_NEAREST)  # (600, 800)
-            depth_h = depth_h[44:556, 80:720]
-
-            return depth_h
+        
 
         if img_id in self.img_id2mask:
             return self.img_id2mask[img_id]

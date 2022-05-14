@@ -337,20 +337,38 @@ class IBRNetWithNeuRay(nn.Module):
         rgb_feat2 = rgb_feat[:, :, None, :, :].repeat(1,1,num_views,1,1)  # [n_rays, n_samples, n_views, n_views, n_feat]
 
         # rgb_feat_mat = rgb_feat1 *rgb_feat2
-        rgb_feat_sum = torch.sum(rgb_feat1 * rgb_feat2, dim =-1)
-        # rgb_feat_sum = F.cosine_similarity(rgb_feat1, rgb_feat2, dim=-1)
+        # rgb_feat_sum = torch.sum(rgb_feat1 * rgb_feat2, dim =-1)
+        rgb_feat_sum = F.cosine_similarity(rgb_feat1, rgb_feat2, dim=-1)
         mask_rgb_feat_sum = torch.eye(num_views)[None, None, ...].type(torch.bool).to(rgb_feat_sum.device).repeat(rgb_feat_sum.shape[0], rgb_feat_sum.shape[1], 1, 1)
         rgb_feat_sum[mask_rgb_feat_sum] = -1e8
-        rgb_feat_exp = torch.exp(rgb_feat_sum) # [n_rays, n_samples, n_views, n_views]
-        
-
+        #rgb_feat_exp = torch.exp(rgb_feat_sum) # [n_rays, n_samples, n_views, n_views]
         # rgb_feat_exp_mean_row = torch.mean(rgb_feat_exp, dim=3) # [n_rays, n_samples, n_views]
         # rgb_feat_exp_mean_total = torch.mean(rgb_feat_exp_mean_row, dim=2)
-        rgb_feat_exp_sum_row = torch.sum(rgb_feat_exp, dim=3)
-        rgb_feat_exp_sum_total = torch.sum(rgb_feat_exp_sum_row, dim=2)
-        rgb_feat_exp_sum_total = F.tanh(rgb_feat_exp_sum_total) # 0->1
+        #rgb_feat_exp_sum_row = torch.sum(rgb_feat_exp*masks, dim=3)
+        #rgb_feat_exp_sum_total = torch.sum(rgb_feat_exp_sum_row, dim=2)
+        # rgb_feat_max = torch.max(rgb_feat_sum,dim=[2,3])[0]
+        rgb_feat_max = torch.max(rgb_feat_sum.reshape(rgb_feat_sum.shape[0], rgb_feat_sum.shape[1], -1),dim =-1 )[0]
+        rgb_feat_max = (rgb_feat_max + 1) / 2
+        # rgb_feat_max = F.sigmoid(rgb_feat_max) # 0->1
 
-        assert torch.all(rgb_feat_exp_sum_total >=0) and torch.all(rgb_feat_exp_sum_total <= 1)
+        rgb_feat_exp_sum_total = rgb_feat_max
+        assert torch.all(rgb_feat_max >=0) and torch.all(rgb_feat_max <= 1)
+
+            # # rgb_feat_mat = rgb_feat1 *rgb_feat2
+            # rgb_feat_sum = torch.sum(rgb_feat1 * rgb_feat2, dim =-1)
+            # # rgb_feat_sum = F.cosine_similarity(rgb_feat1, rgb_feat2, dim=-1)
+            # mask_rgb_feat_sum = torch.eye(num_views)[None, None, ...].type(torch.bool).to(rgb_feat_sum.device).repeat(rgb_feat_sum.shape[0], rgb_feat_sum.shape[1], 1, 1)
+            # rgb_feat_sum[mask_rgb_feat_sum] = -1e8
+            # rgb_feat_exp = torch.exp(rgb_feat_sum) # [n_rays, n_samples, n_views, n_views]
+            
+
+            # # rgb_feat_exp_mean_row = torch.mean(rgb_feat_exp, dim=3) # [n_rays, n_samples, n_views]
+            # # rgb_feat_exp_mean_total = torch.mean(rgb_feat_exp_mean_row, dim=2)
+            # rgb_feat_exp_sum_row = torch.sum(rgb_feat_exp, dim=3)
+            # rgb_feat_exp_sum_total = torch.sum(rgb_feat_exp_sum_row, dim=2)
+            # rgb_feat_exp_sum_total = F.tanh(rgb_feat_exp_sum_total) # 0->1
+
+            # assert torch.all(rgb_feat_exp_sum_total >=0) and torch.all(rgb_feat_exp_sum_total <= 1)
 
         direction_feat = self.ray_dir_fc(ray_diff)
         rgb_in = rgb_feat[..., :3]
@@ -435,4 +453,5 @@ class IBRNetWithNeuRay(nn.Module):
         out1 = torch.cat([rgb_out1, sigma_out1], dim=-1)
 
         consistent_weights = rgb_feat_exp_sum_total
+        # return out1, gt_ibr, consistent_weights, rgb_feat_sum
         return out1, gt_ibr, consistent_weights

@@ -51,7 +51,7 @@ class ConsistentPromptLoss(Loss):
         alpha_values = data_pr['alpha_values']
 
         mask = (consistent_weights > 0.5)
-        loss = torch.mean( consistent_weights[mask] * (1 - alpha_values[mask])) * 1e-1
+        loss = torch.mean( consistent_weights[mask] * (1 - alpha_values[mask])) * 1e-2
         outputs = {'loss_consistent_prompt': loss}
         return outputs
 

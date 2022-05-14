@@ -1,4 +1,4 @@
-name: neuray_ft_scan103_cv_640_512_scalarsigmaprompt_consistent_loss
+name: neuray_ft_scan103_cv_640_512_scalarsigmaprompt_consistent_loss_cosin
 
 # network
 network: neuray_ft
