@@ -180,7 +180,7 @@ class NeuralRayBaseRenderer(nn.Module):
     def compute_prompt_feat(self, que_pts, que_dir, prompt_feats):
         # prompt_feats 1 x 1 x H x W x D
         min_range = torch.Tensor([-1.5, -1.5, -4.7]).to(que_pts.device)
-        max_range = torch.Tensor([1.5, 1.5, -2.7]).to(que_pts.device)
+        max_range = torch.Tensor([1.5, 1.5, -1.7]).to(que_pts.device)
         # que_pts# qn,rn,dn,3
         qn, rn, dn,_ = que_pts.shape
         que_pts_flatten = que_pts.reshape(qn * rn * dn, -1) # n_samples, 3

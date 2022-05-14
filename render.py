@@ -179,7 +179,7 @@ def render_video_ft(database_name, cfg_fn, pose_type, pose_fn, render_depth=Fals
         with torch.no_grad():
             render_info = renderer.render_pose(que_imgs_info)
         h, w = que_shapes[qi]
-        save_renderings(output_dir, qi, render_info, h, w)
+        save_renderings(output_dir, qi, render_info, h, w, save_fine_only=True)
         if render_depth:
             save_depth(output_dir, qi, render_info, h, w, que_depth_ranges[qi])
 
