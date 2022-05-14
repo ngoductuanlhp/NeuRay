@@ -60,9 +60,11 @@ class ValidationEvaluator:
             with torch.no_grad():
                 outputs = model(data)
                 for loss in losses:
+                    # if k in ['loss_tv_full_prompt'] :
+                    #     continue
                     loss_results=loss(outputs, data, step, data_index=data_i, model_name=model_name)
                     for k,v in loss_results.items():
-                        if k in ['loss_prompt', 'loss_consistent_prompt', 'loss_smooth_prompt'] :
+                        if k in ['loss_prompt', 'loss_consistent_prompt', 'loss_smooth_prompt', 'loss_tv_full_prompt'] :
                             continue
                         if type(v)==torch.Tensor:
                             v=v.detach().cpu().numpy()
@@ -99,7 +101,7 @@ class ValidationEvaluator:
                     # save_depth(save_dir, data_i, outputs, h, w, que_depth_ranges, gt_depth=gt_depth)
 
         for k,v in eval_results.items():
-            if k == 'loss_prompt':
+            if k in ['loss_prompt', 'loss_consistent_prompt', 'loss_smooth_prompt', 'loss_tv_full_prompt'] :
                 continue
             eval_results[k]=np.concatenate(v,axis=0)
 

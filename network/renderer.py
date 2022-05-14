@@ -178,8 +178,9 @@ class NeuralRayBaseRenderer(nn.Module):
         return hit_prob, colors, pixel_colors, alpha_values, mean_hit_prob, gt_ibr, consistent_weights
 
     def compute_prompt_feat(self, que_pts, que_dir, prompt_feats):
-        min_range = torch.Tensor([-1, 0, -1]).to(que_pts.device)
-        max_range = torch.Tensor([1, 0.9, 1]).to(que_pts.device)
+        # prompt_feats 1 x 1 x H x W x D
+        min_range = torch.Tensor([-1.5, -1.5, -4.7]).to(que_pts.device)
+        max_range = torch.Tensor([1.5, 1.5, -2.7]).to(que_pts.device)
         # que_pts# qn,rn,dn,3
         qn, rn, dn,_ = que_pts.shape
         que_pts_flatten = que_pts.reshape(qn * rn * dn, -1) # n_samples, 3
@@ -189,24 +190,30 @@ class NeuralRayBaseRenderer(nn.Module):
         size = (max_range - min_range).reshape(-1,3)
         que_pts_flatten = 2*(que_pts_flatten - min_range.reshape(-1,3))/ size - 1.
 
+        n_samples, dim_space = que_pts_flatten.shape
+        que_pts_flatten = que_pts_flatten.view(1, n_samples, 1, 1, dim_space)
 
-        que_pts_flatten_T = que_pts_flatten.permute(1,0) # 3, n_samples
-        coordinate_line = torch.stack((torch.zeros_like(que_pts_flatten_T), que_pts_flatten_T), dim=-1).detach().view(3, -1, 1, 2) # (3, N, 1, 2) 
+        line_coef_point = F.grid_sample(prompt_feats, que_pts_flatten, align_corners=True).view(-1, n_samples) # (channel_dim, N_Sample)
+        line_coef_point = line_coef_point.T # (N_Sample, channel_dim)
+        line_coef_point_final = line_coef_point.reshape(qn, rn, dn, -1)
+        return line_coef_point_final
+        # que_pts_flatten_T = que_pts_flatten.permute(1,0) # 3, n_samples
+        # coordinate_line = torch.stack((torch.zeros_like(que_pts_flatten_T), que_pts_flatten_T), dim=-1).detach().view(3, -1, 1, 2) # (3, N, 1, 2) 
 
-        line_coef_point = F.grid_sample(prompt_feats['0'],coordinate_line[[0]],
-                                        align_corners=True).view(-1,*que_pts_flatten.shape[:1])
+        # line_coef_point = F.grid_sample(prompt_feats['0'],coordinate_line[[0]],
+        #                                 align_corners=True).view(-1,*que_pts_flatten.shape[:1])
         
-        line_coef_point = line_coef_point * F.grid_sample(prompt_feats['1'], coordinate_line[[1]],
-                                        align_corners=True).view(-1,*que_pts_flatten.shape[:1])
+        # line_coef_point = line_coef_point * F.grid_sample(prompt_feats['1'], coordinate_line[[1]],
+        #                                 align_corners=True).view(-1,*que_pts_flatten.shape[:1])
         
-        line_coef_point = line_coef_point * F.grid_sample(prompt_feats['2'], coordinate_line[[2]],
-                                        align_corners=True).view(-1,*que_pts_flatten.shape[:1]) # (channel_dim, N_Sample)
+        # line_coef_point = line_coef_point * F.grid_sample(prompt_feats['2'], coordinate_line[[2]],
+        #                                 align_corners=True).view(-1,*que_pts_flatten.shape[:1]) # (channel_dim, N_Sample)
 
-        # NOTE single scalar prompt for sigma
-        line_coef_point = torch.sum(line_coef_point, dim=0, keepdim=True)
-        line_coef_point = line_coef_point.T.reshape(qn, rn, dn, -1)
+        # # NOTE single scalar prompt for sigma
+        # line_coef_point = torch.sum(line_coef_point, dim=0, keepdim=True)
+        # line_coef_point = line_coef_point.T.reshape(qn, rn, dn, -1)
 
-        return line_coef_point
+        # return line_coef_point
 
         # que_pts_rs = que_pts.reshape(qn*rn*dn, -1)
         # que_dir_rs = que_dir.reshape(qn*rn*dn, -1)
@@ -237,12 +244,15 @@ class NeuralRayBaseRenderer(nn.Module):
 
         hit_prob_nr, colors_nr, pixel_colors_nr, alpha_values, mean_hit_prob, gt_ibr, consistent_weights = self.network_rendering(prj_dict, que_dir, is_fine, prompt)
         outputs = {'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr,\
-                'm_hit_prob': mean_hit_prob, 'out_ibr': gt_ibr.unsqueeze(0), 'out_prompt': prompt}
+                # 'm_hit_prob': mean_hit_prob, 
+                # 'out_ibr': gt_ibr.unsqueeze(0)
+                }
 
         # NOTE add prompt params
-        outputs['alpha_values'] = alpha_values
-        outputs['consistent_weights'] = consistent_weights
-        outputs['que_depth'] = que_depth
+            # outputs['alpha_values'] = alpha_values
+            # outputs['consistent_weights'] = consistent_weights
+            # outputs['que_depth'] = que_depth
+
         # outputs['rgb_feat_sum'] = rgb_feat_sum
         # hit_prob_consist = alpha_values2hit_prob(consistent_weights)
         # outputs['render_depth_consistent'] = torch.sum(hit_prob_consist * que_depth, -1) # qn,rn
@@ -514,11 +524,12 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         return ray_feats_cur
 
     def _initialization(self):
-        self.prompt_feats = nn.ParameterDict()
-        for i in range(3):
-            # self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 3 + 16, 128, 1]))
-            # self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 35+16, 128, 1]))
-            self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 50, 128, 1]))
+        
+        # self.prompt_feats = nn.ParameterDict()
+        # # for i in range(3):
+        # #     # self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 3 + 16, 128, 1]))
+        # #     # self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 35+16, 128, 1]))
+        #     self.prompt_feats[str(i)] = nn.Parameter(0.1 * torch.randn([1, 1, 128, 128, 128]))
         # self.bm_rgb = nn.Linear(64+3+3, 3, bias=False)
         # self.bm_sig = nn.Linear(64+3, 16, bias=False)
 
@@ -554,6 +565,8 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
             for k in range(ref_num):
                 self.ray_feats.append(nn.Parameter(torch.randn(1,dim,fh,fw)))
 
+        self.prompt_feats = nn.Parameter(0.1 * torch.randn([1, 1, 128, 128, 128]))
+
     def slice_imgs_info(self, ref_idx, val_idx, is_train):
         # prepare ref imgs info
         ref_imgs_info = imgs_info_slice(self.ref_imgs_info, torch.from_numpy(ref_idx).long())
@@ -588,6 +601,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         ref_imgs_info.pop('ray_feats')
         ref_imgs_info.pop('img_feats')
         render_outputs.update({'ref_imgs_info': ref_imgs_info, 'que_imgs_info': que_imgs_info})
+        render_outputs['prompt_feats'] = self.prompt_feats
         return render_outputs
 
     def train_step(self):

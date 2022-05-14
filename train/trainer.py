@@ -147,6 +147,7 @@ class Trainer:
             log_info={}
             outputs=self.train_network(train_data)
             for loss in self.train_losses:
+                # print('debug', loss)
                 loss_results = loss(outputs,train_data,step)
                 for k,v in loss_results.items():
                     log_info[k]=v
@@ -155,7 +156,7 @@ class Trainer:
             for k,v in log_info.items():
                 if k.startswith('loss'):
                     loss=loss+torch.mean(v)
-            # print('loss_consistent_prompt', log_info['loss_consistent_prompt'])
+            # print('loss_tv_full_prompt', log_info['loss_tv_full_prompt'])
             loss.backward()
             self.optimizer.step()
             if ((step+1) % self.cfg['train_log_step']) == 0:

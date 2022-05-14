@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from network.ops import interpolate_feats
-
+import numpy as np
 
 class Loss:
     def __init__(self, keys):
@@ -190,6 +190,48 @@ class DepthLoss(Loss):
             outputs['loss_depth_fine'] = compute_loss(data_pr['depth_mean_fine'])
         return outputs
 
+class TVFullPromptLoss(Loss):
+    default_cfg={}
+    def __init__(self, cfg):
+        self.cfg={**self.default_cfg,**cfg}
+        super().__init__([f'loss_tv_full_prompt'])
+        self.percentage_sample = 0.4
+    
+    def sampling_indices(self, Dx,Dy,Dz):
+        '''
+        Subsample indices for prompt tensor
+        '''
+        xrange = torch.arange(Dx - 1)
+        yrange = torch.arange(Dy - 1)
+        zrange = torch.arange(Dz - 1)
+        xx, yy, zz = torch.meshgrid(xrange,yrange,zrange)
+        grid = torch.stack([xx.flatten(),yy.flatten(),zz.flatten()],dim=-1)
+        sampling_indices = torch.from_numpy(np.random.choice(len(grid),int(self.percentage_sample * len(grid)),replace=False))
+        selected_indices = grid[sampling_indices]
+        return selected_indices
+
+    def __call__(self, data_pr, data_gt, step, **kwargs):
+        prompt = data_pr['prompt_feats']
+        subsample_indices = self.sampling_indices(prompt.shape[2], prompt.shape[3], prompt.shape[4])
+        prompt = prompt.permute(0,2,3,4,1)
+        prompt_feats = prompt[0,subsample_indices[0],subsample_indices[1],subsample_indices[2],:]
+        prompt_featsx = prompt[0,subsample_indices[0]+1,subsample_indices[1],subsample_indices[2],:]
+        prompt_featsy = prompt[0,subsample_indices[0],subsample_indices[1]+1,subsample_indices[2],:]
+        prompt_featsz = prompt[0,subsample_indices[0],subsample_indices[1],subsample_indices[2]+1,:]
+        loss = torch.sqrt(
+            torch.norm(prompt_featsx - prompt_feats,dim=-1,p=2) + \
+            torch.norm(prompt_featsy - prompt_feats,dim=-1,p=2) + \
+            torch.norm(prompt_featsz - prompt_feats,dim=-1,p=2)
+        )
+
+        outputs = {
+            'loss_tv_full_prompt': torch.mean(loss) * 1e-1
+        }
+
+        return outputs
+
+
+
 name2loss={
     'render': RenderLoss,
     'depth': DepthLoss,
@@ -197,4 +239,5 @@ name2loss={
     'prompt': PromptLoss,
     'smooth_prompt': SmoothPromptLoss,
     'consistent_prompt': ConsistentPromptLoss,
+    'tv_full_prompt': TVFullPromptLoss
 }

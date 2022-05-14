@@ -354,6 +354,8 @@ class IBRNetWithNeuRay(nn.Module):
         rgb_feat_exp_sum_total = rgb_feat_max
         assert torch.all(rgb_feat_max >=0) and torch.all(rgb_feat_max <= 1)
 
+            #####################################################################3
+
             # # rgb_feat_mat = rgb_feat1 *rgb_feat2
             # rgb_feat_sum = torch.sum(rgb_feat1 * rgb_feat2, dim =-1)
             # # rgb_feat_sum = F.cosine_similarity(rgb_feat1, rgb_feat2, dim=-1)
@@ -415,16 +417,16 @@ class IBRNetWithNeuRay(nn.Module):
         # globalfeat = prompt_sigma_feats
 
         num_valid_obs = torch.sum(mask, dim=2)
-        globalfeat = globalfeat + self.pos_encoding
+        # globalfeat = globalfeat + self.pos_encoding
 
-        # print('ibr', globalfeat.shape, self.pos_encoding.shape)
-        globalfeat, _ = self.ray_attention(globalfeat, globalfeat, globalfeat,
-                                           mask=(num_valid_obs > 1).float())  # [n_rays, n_samples, 16]
-        sigma = self.out_geometry_fc(globalfeat)  # [n_rays, n_samples, 1]
+        # # print('ibr', globalfeat.shape, self.pos_encoding.shape)
+        # globalfeat, _ = self.ray_attention(globalfeat, globalfeat, globalfeat,
+        #                                    mask=(num_valid_obs > 1).float())  # [n_rays, n_samples, 16]
+        # sigma = self.out_geometry_fc(globalfeat)  # [n_rays, n_samples, 1]
 
-        # NOTE blend sigma
-        sigma = rgb_feat_exp_sum_total.unsqueeze(-1) * sigma + (1. - rgb_feat_exp_sum_total.unsqueeze(-1)) * prompt_sigma_feats
-
+        # # NOTE blend sigma
+        # sigma = rgb_feat_exp_sum_total.unsqueeze(-1) * sigma + (1. - rgb_feat_exp_sum_total.unsqueeze(-1)) * prompt_sigma_feats
+        sigma = prompt_sigma_feats
         sigma_out1 = sigma.masked_fill(num_valid_obs < 1, 0.)  # set the sigma of invalid point to zero
 
         # # NOTE mask low consistent point by 0
@@ -452,6 +454,7 @@ class IBRNetWithNeuRay(nn.Module):
         # return out
         out1 = torch.cat([rgb_out1, sigma_out1], dim=-1)
 
-        consistent_weights = rgb_feat_exp_sum_total
+        # consistent_weights = rgb_feat_exp_sum_total
+
         # return out1, gt_ibr, consistent_weights, rgb_feat_sum
-        return out1, gt_ibr, consistent_weights
+        return out1, gt_ibr, rgb_feat_exp_sum_total
