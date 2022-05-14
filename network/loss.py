@@ -70,7 +70,9 @@ class SmoothPromptLoss(Loss):
         loss = 0
         for k in prompt_feats.keys():
             # loss += self.compute_loss(feat_line)*1e-3
-            loss += torch.mean((prompt_feats[k][:,:,1:,:] - prompt_feats[k][:,:,:-1,:])**2)*1e-3
+            displacement = torch.norm(prompt_feats[k][:,:,1:,:] - prompt_feats[k][:,:,:-1,:], dim=-1, p=2)
+            loss += torch.mean(displacement) * 1e-1
+            # loss += torch.mean((prompt_feats[k][:,:,1:,:] - prompt_feats[k][:,:,:-1,:])**2)*1e-3
         outputs = {'loss_smooth_prompt': loss}
         return outputs
 

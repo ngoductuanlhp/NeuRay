@@ -348,7 +348,7 @@ class IBRNetWithNeuRay(nn.Module):
         #rgb_feat_exp_sum_total = torch.sum(rgb_feat_exp_sum_row, dim=2)
         # rgb_feat_max = torch.max(rgb_feat_sum,dim=[2,3])[0]
         rgb_feat_max = torch.max(rgb_feat_sum.reshape(rgb_feat_sum.shape[0], rgb_feat_sum.shape[1], -1),dim =-1 )[0]
-        rgb_feat_max = (rgb_feat_max + 1) / 2
+        # rgb_feat_max = (rgb_feat_max + 1) / 2
         # rgb_feat_max = F.sigmoid(rgb_feat_max) # 0->1
 
         rgb_feat_exp_sum_total = rgb_feat_max
