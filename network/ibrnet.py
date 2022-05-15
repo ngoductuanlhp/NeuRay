@@ -565,7 +565,7 @@ class IBRNetWithNeuRay2(nn.Module):
         #rgb_feat_exp_sum_row = torch.sum(rgb_feat_exp*masks, dim=3)
         #rgb_feat_exp_sum_total = torch.sum(rgb_feat_exp_sum_row, dim=2)
         consistent_mats_exp = torch.exp(consistent_mats)
-        consistent_mats_row = torch.log(torch.sum(consistent_mats_exp, dim=3)) # [n_rays, n_samples, n_views]
+        consistent_mats_row = torch.log(torch.sum(consistent_mats_exp*10, dim=3)) / 10 # [n_rays, n_samples, n_views]
         # consistent_mats_total = torch.log(torch.sum(consistent_mats_exp, dim=[2, 3]))
         # consistent_mats_row = torch.max(consistent_mats, dim=3)[0] # [n_rays, n_samples, n_views]
         # consistent_mats_total = torch.max(consistent_mats_row, dim=2)[0]
