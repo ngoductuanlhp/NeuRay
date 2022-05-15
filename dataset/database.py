@@ -348,8 +348,9 @@ class DTUMVSTestSparseDatabase(BaseDatabase):
         if self.background=='black':
             mask = self.get_mask(img_id)
             img = img * mask.astype(np.uint8)[:,:,None]
-        else:
-            raise NotImplementedError
+        # else:
+        #     img = img[:,]
+        #     raise NotImplementedError
         self.img_id2imgs[img_id]=img
         return img
 
