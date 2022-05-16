@@ -203,7 +203,7 @@ class NeuralRayBaseRenderer(nn.Module):
         que_pts, que_dir = depth2points(que_imgs_info, que_depth)
 
         prj_dict = project_points_dict(ref_imgs_info, que_pts)
-        prj_dict = self.predict_proj_ray_prob(prj_dict, ref_imgs_info, que_dists, is_fine)
+        # prj_dict = self.predict_proj_ray_prob(prj_dict, ref_imgs_info, que_dists, is_fine)
         prj_dict = self.get_img_feats(ref_imgs_info, prj_dict)
 
         if debug:
@@ -483,7 +483,21 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
             name = gen_cfg['name']
             ckpt = torch.load(f'data/model/{name}/model_best.pth')
             gen_renderer = NeuralRayGenRenderer(gen_cfg).cuda()
-            gen_renderer.load_state_dict(ckpt['network_state_dict'])
+            # gen_renderer.load_state_dict(ckpt['network_state_dict'])
+
+            loaded_st = ckpt['network_state_dict']
+            model_st = gen_renderer.state_dict()
+
+            match_st = {}
+            for k in loaded_st.keys():
+                if k not in model_st:
+                    continue
+                if loaded_st[k].shape != model_st[k].shape:
+                    print(f'No load {k}, miss shape')
+                    continue
+                match_st[k] = loaded_st[k]
+            gen_renderer.load_state_dict(match_st, strict=False)
+
             gen_renderer = gen_renderer.eval()
 
             # init from generalization model
