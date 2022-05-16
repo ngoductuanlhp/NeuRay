@@ -119,16 +119,25 @@ def build_imgs_info(database, ref_ids, pad_interval=-1, is_aligned=True, align_d
         ref_imgs_info = pad_imgs_info(ref_imgs_info, pad_interval)
     return ref_imgs_info
 
-def build_render_imgs_info(que_pose,que_K,que_shape,que_depth_range):
+def build_render_imgs_info(que_pose,que_K,que_shape,que_depth_range, que_depths=None):
     h, w = que_shape
     h, w = int(h), int(w)
     que_coords = np.stack(np.meshgrid(np.arange(w), np.arange(h)), -1)
     que_coords = que_coords.reshape([1, -1, 2]).astype(np.float32)
-    return {'poses': que_pose.astype(np.float32)[None,:,:],  # 1,3,4
+
+    
+
+    rt_dict = {'poses': que_pose.astype(np.float32)[None,:,:],  # 1,3,4
             'Ks': que_K.astype(np.float32)[None,:,:],  # 1,3,3
             'coords': que_coords,
             'depth_range': np.asarray(que_depth_range, np.float32)[None, :],
             'shape': (h,w)}
+
+    if que_depths is not None:
+        # print('que_depths', que_depths.shape)
+        que_depths = que_depths.reshape(1, 1, h*w)
+        rt_dict['depth'] = que_depths
+    return rt_dict
 
 def imgs_info_to_torch(imgs_info):
     for k, v in imgs_info.items():

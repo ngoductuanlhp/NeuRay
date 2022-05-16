@@ -15,7 +15,7 @@ from utils.imgs_info import build_imgs_info, build_render_imgs_info, imgs_info_t
 from utils.render_poses import get_render_poses
 from utils.view_select import select_working_views_db
 
-def prepare_render_info(database, pose_type, pose_fn, use_depth):
+def prepare_render_info(database, pose_type, pose_fn, use_depth, has_depth=False):
     # interpolate poses
     if pose_type.startswith('eval'):
         split_name = 'test' if use_depth else 'test_all'
@@ -24,6 +24,8 @@ def prepare_render_info(database, pose_type, pose_fn, use_depth):
         que_poses = np.asarray([database.get_pose(render_id) for render_id in render_ids],np.float32)
         que_shapes = np.asarray([database.get_image(render_id).shape[:2] for render_id in render_ids],np.int64)
         que_depth_ranges = np.asarray([database.get_depth_range(render_id) for render_id in render_ids],np.float32)
+        if has_depth:
+            que_depths = np.asarray([database.get_depth(render_id) for render_id in render_ids],np.float32)
     else:
         que_poses = get_render_poses(database, pose_type, pose_fn)
 
@@ -44,6 +46,8 @@ def prepare_render_info(database, pose_type, pose_fn, use_depth):
 
         ref_ids = database.get_img_ids()
         render_ids = None
+    if has_depth:
+        return que_poses, que_Ks, que_shapes, que_depth_ranges, ref_ids, render_ids, que_depths
     return que_poses, que_Ks, que_shapes, que_depth_ranges, ref_ids, render_ids
 
 def save_renderings(output_dir, qi, render_info, h, w):
@@ -161,8 +165,8 @@ def render_video_ft(database_name, cfg_fn, pose_type, pose_fn, render_depth=Fals
     renderer.eval()
 
     database = parse_database_name(database_name)
-    que_poses, que_Ks, que_shapes, que_depth_ranges, ref_ids, render_ids = \
-        prepare_render_info(database, pose_type, pose_fn, False)
+    que_poses, que_Ks, que_shapes, que_depth_ranges, ref_ids, render_ids, que_depths = \
+        prepare_render_info(database, pose_type, pose_fn, False, has_depth=True)
     assert(database.database_name == renderer.database.database_name)
 
     output_dir = f'data/render/{database.database_name}/{cfg["name"]}-{step}-{pose_type}'
@@ -173,10 +177,10 @@ def render_video_ft(database_name, cfg_fn, pose_type, pose_fn, render_depth=Fals
     re = num if re==-1 else re
     for qi in tqdm(range(rb,re)):
         if os.path.exists(f'{output_dir}/{qi}.jpg'): continue
-        que_imgs_info = build_render_imgs_info(que_poses[qi], que_Ks[qi], que_shapes[qi], que_depth_ranges[qi])
+        que_imgs_info = build_render_imgs_info(que_poses[qi], que_Ks[qi], que_shapes[qi], que_depth_ranges[qi], que_depths=que_depths[qi])
         que_imgs_info = to_cuda(imgs_info_to_torch(que_imgs_info))
         with torch.no_grad():
-            render_info = renderer.render_pose(que_imgs_info)
+            render_info = renderer.render_pose(que_imgs_info, debug=True)
         h, w = que_shapes[qi]
         save_renderings(output_dir, qi, render_info, h, w)
         if render_depth:

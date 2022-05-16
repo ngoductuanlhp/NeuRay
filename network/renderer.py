@@ -165,7 +165,38 @@ class NeuralRayBaseRenderer(nn.Module):
         pixel_colors = torch.sum(hit_prob.unsqueeze(-1)*colors,2)
         return hit_prob, colors, pixel_colors
 
-    def render_by_depth(self, que_depth, que_imgs_info, ref_imgs_info, is_train, is_fine):
+    def network_rendering_with_depthgt(self, prj_dict, que_dir, is_fine, depth_gt, que_depth):
+        if is_fine:
+            density, colors = self.fine_agg_net(prj_dict, que_dir)
+        else:
+            density, colors = self.agg_net(prj_dict, que_dir)
+
+        alpha_values = 1.0 - torch.exp(-torch.relu(density))
+        hit_prob = alpha_values2hit_prob(alpha_values)
+        # pixel_colors = torch.sum(hit_prob.unsqueeze(-1)*colors,2)
+
+        # que_depth # qn, rn, dn
+        # depth_gt # 1,1,512
+        # colors # qn, rn, dn, 3
+        depth_gt = depth_gt.permute(0,2,1) # qn, rn, 1
+        depth_diff = torch.abs(que_depth - depth_gt) # qn, rn, dn
+        min_inds_depth = torch.min(depth_diff, dim=-1)[1].type(torch.long) # qn, rn
+
+        # breakpoint()
+        color_selects = []
+        for i in range(colors.shape[-1]):
+            # breakpoint()
+            # color_select = torch.index_select(colors[...,i], 2, min_inds_depth.unsqueeze(-1))
+            color_select = torch.gather(colors[...,i], 2, min_inds_depth.unsqueeze(-1))
+            color_selects.append(color_select)
+
+        pixel_colors = torch.cat(color_selects, dim=-1) # # qn, rn, 3
+        valid_mask = (depth_gt.repeat(1,1,3) > 0)
+        pixel_colors[~valid_mask] = 0
+        # pixel_colors = torch.index_select(colors, 2, min_inds_depth.unsqueeze(-1))
+        return hit_prob, colors, pixel_colors
+
+    def render_by_depth(self, que_depth, que_imgs_info, ref_imgs_info, is_train, is_fine, debug=False):
         ref_imgs_info = ref_imgs_info.copy()
         que_imgs_info = que_imgs_info.copy()
         que_dists = depth2inv_dists(que_depth,que_imgs_info['depth_range'])
@@ -175,7 +206,12 @@ class NeuralRayBaseRenderer(nn.Module):
         prj_dict = self.predict_proj_ray_prob(prj_dict, ref_imgs_info, que_dists, is_fine)
         prj_dict = self.get_img_feats(ref_imgs_info, prj_dict)
 
-        hit_prob_nr, colors_nr, pixel_colors_nr = self.network_rendering(prj_dict, que_dir, is_fine)
+        if debug:
+            depth_gt = que_imgs_info['depth'] # (1,1,batch_num)
+            hit_prob_nr, colors_nr, pixel_colors_nr = self.network_rendering_with_depthgt(prj_dict, que_dir, is_fine, depth_gt, que_depth)
+        else:
+            hit_prob_nr, colors_nr, pixel_colors_nr = self.network_rendering(prj_dict, que_dir, is_fine)
+
         outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr}
 
         # direct rendering
@@ -202,7 +238,7 @@ class NeuralRayBaseRenderer(nn.Module):
             outputs['render_depth'] = torch.sum(hit_prob_nr * que_depth, -1) # qn,rn
         return outputs
 
-    def fine_render_impl(self, coarse_render_info, que_imgs_info, ref_imgs_info, is_train):
+    def fine_render_impl(self, coarse_render_info, que_imgs_info, ref_imgs_info, is_train, debug=False):
         fine_depth = sample_fine_depth(coarse_render_info['depth'], coarse_render_info['hit_prob'].detach(),
                                        que_imgs_info['depth_range'], self.cfg['fine_depth_sample_num'], is_train)
 
@@ -211,21 +247,21 @@ class NeuralRayBaseRenderer(nn.Module):
             que_depth = torch.sort(torch.cat([coarse_render_info['depth'], fine_depth], -1), -1)[0]
         else:
             que_depth = torch.sort(fine_depth, -1)[0]
-        outputs = self.render_by_depth(que_depth, que_imgs_info, ref_imgs_info, is_train, True)
+        outputs = self.render_by_depth(que_depth, que_imgs_info, ref_imgs_info, is_train, True, debug=debug)
         return outputs
 
-    def render_impl(self, que_imgs_info, ref_imgs_info, is_train):
+    def render_impl(self, que_imgs_info, ref_imgs_info, is_train, debug=False):
         # [qn,rn,dn]
         que_depth, _ = sample_depth(que_imgs_info['depth_range'], que_imgs_info['coords'], self.cfg['depth_sample_num'], False)
-        outputs = self.render_by_depth(que_depth, que_imgs_info, ref_imgs_info, is_train, False)
+        outputs = self.render_by_depth(que_depth, que_imgs_info, ref_imgs_info, is_train, False, debug=debug)
         if self.cfg['use_hierarchical_sampling']:
             coarse_render_info= {'depth': que_depth, 'hit_prob': outputs['hit_prob_nr']}
-            fine_outputs = self.fine_render_impl(coarse_render_info, que_imgs_info, ref_imgs_info, is_train)
+            fine_outputs = self.fine_render_impl(coarse_render_info, que_imgs_info, ref_imgs_info, is_train, debug=debug)
             for k, v in fine_outputs.items():
                 outputs[k + "_fine"] = v
         return outputs
 
-    def render(self, que_imgs_info, ref_imgs_info, is_train):
+    def render(self, que_imgs_info, ref_imgs_info, is_train, debug=False):
         ref_img_feats = self.image_encoder(ref_imgs_info['imgs'])
         ref_imgs_info['img_feats'] = ref_img_feats
         ref_imgs_info['ray_feats'] = self.vis_encoder(ref_imgs_info['ray_feats'], ref_img_feats)
@@ -236,11 +272,17 @@ class NeuralRayBaseRenderer(nn.Module):
 
         ray_batch_num = self.cfg["ray_batch_num"]
         coords = que_imgs_info['coords']
+        if debug:
+            depth = que_imgs_info['depth']
+            depth = depth.reshape(depth.shape[0], depth.shape[1], -1)
         ray_num = coords.shape[1]
         render_info_all = {}
         for ray_id in range(0,ray_num,ray_batch_num):
-            que_imgs_info['coords']=coords[:,ray_id:ray_id+ray_batch_num]
-            render_info = self.render_impl(que_imgs_info,ref_imgs_info,is_train)
+            que_imgs_info['coords'] = coords[:,ray_id:ray_id+ray_batch_num]
+
+            if debug:
+                que_imgs_info['depth'] = depth[:,:,ray_id:ray_id+ray_batch_num]
+            render_info = self.render_impl(que_imgs_info,ref_imgs_info,is_train, debug=debug)
             output_keys = [k for k in render_info.keys() if is_train or (not k.startswith('hit_prob'))]
             for k in output_keys:
                 v = render_info[k]
@@ -375,7 +417,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
 
         if self.cfg['use_validation']:
             self.val_dist_idx = compute_nearest_camera_indices(self.database, self.val_ids, self.ref_ids)
-            val_imgs_info = build_imgs_info(self.database, self.val_ids, -1, True, has_depth=False)
+            val_imgs_info = build_imgs_info(self.database, self.val_ids, -1, True, has_depth=True)
             self.val_imgs_info = imgs_info_to_torch(val_imgs_info)
             self.val_num = len(self.val_ids)
 
@@ -524,7 +566,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         render_outputs.update({'que_imgs_info': que_imgs_info})
         return render_outputs
 
-    def render_pose(self, render_imgs_info):
+    def render_pose(self, render_imgs_info, debug=False):
         # this function is used in rendering from arbitrary poses
         render_pose = render_imgs_info['poses'].cpu().numpy()
         ref_poses = self.ref_imgs_info['poses'].cpu().numpy()
@@ -533,7 +575,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         ref_imgs_info['ray_feats'] = torch.cat([self.ray_feats[ref_i] for ref_i in ref_idx], 0)
 
         with torch.no_grad():
-            render_outputs = self.render(render_imgs_info, ref_imgs_info, False)
+            render_outputs = self.render(render_imgs_info, ref_imgs_info, False, debug=debug)
         return render_outputs
 
     def forward(self, data):

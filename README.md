@@ -176,6 +176,11 @@ python render.py --cfg configs/ft/neuray_ft_lego_pretrain.yaml \
                  --render_type ft
 ```
 
+python render.py --cfg configs/ft/neuray_ft_scan1_debug.yaml \
+                 --database dtu_test_sparse_mvs/scan1/black_640 \
+                 --pose_type eval \
+                 --render_type ft
+
 ## Code explanation
 
 We have provided explanation on variable naming convention in [here](codes_expalanations.md) to make our codes more readable.
