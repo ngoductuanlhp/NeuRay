@@ -15,7 +15,7 @@ from network.metrics import name2metrics
 from train.train_tools import to_cuda, Logger, reset_learning_rate, MultiGPUWrapper, DummyLoss
 from train.train_valid import ValidationEvaluator
 from utils.dataset_utils import simple_collate_fn, dummy_collate_fn
-
+from utils.base_utils import load_cfg, to_cuda, color_map_backward, make_dir
 
 class Trainer:
     default_cfg={
@@ -141,9 +141,11 @@ class Trainer:
                 val_results={}
                 val_para = 0
                 for vi, val_set in enumerate(self.val_set_list):
+                    output_dir = os.path.join(self.model_dir, 'render_{}'.format(str(step+1)))
+                    make_dir(output_dir)
                     val_results_cur, val_para_cur = self.val_evaluator(
                         self.network, self.val_losses + self.val_metrics, val_set, step,
-                        self.model_name, val_set_name=self.val_set_names[vi])
+                        self.model_name, val_set_name=self.val_set_names[vi], save_dir=output_dir)
                     for k,v in val_results_cur.items():
                         val_results[f'{self.val_set_names[vi]}-{k}'] = v
                     # always use the final val set to select model!

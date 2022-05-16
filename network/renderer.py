@@ -48,7 +48,7 @@ class NeuralRayBaseRenderer(nn.Module):
         'ray_mask_view_num': 2,
         'ray_mask_point_num': 8,
 
-        'render_depth': False,
+        'render_depth': True,
     }
     def __init__(self,cfg):
         super().__init__()
@@ -382,21 +382,21 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         # init from generalization model
         self._initialization()
 
-        # after initialization, we check the correctness of rendered images
-        if self.cfg['use_validation'] and self.cfg['validate_initialization']:
-            print('init validation rendering ...')
-            Path(f'data/vis_val/{self.cfg["name"]}').mkdir(exist_ok=True, parents=True)
-            self.eval()
-            self.cuda()
-            for vi in tqdm(range(self.val_num)):
-                outputs = self.validate_step(vi)
-                key_name = 'pixel_colors_nr_fine' if self.cfg['use_hierarchical_sampling'] else 'pixel_colors_nr'
-                img_gt = self.val_imgs_info['imgs'][vi] # 3,h,w
-                _, h, w = img_gt.shape
-                img_gt = color_map_backward(img_gt.permute(1,2,0).numpy())
-                rgb_pr = outputs[key_name].reshape(h, w, 3).cpu().numpy()
-                img_pr = color_map_backward(rgb_pr)
-                imsave(f'data/vis_val/{self.cfg["name"]}/init-{vi}.jpg',concat_images_list(img_gt,img_pr))
+        # # after initialization, we check the correctness of rendered images
+        # if self.cfg['use_validation'] and self.cfg['validate_initialization']:
+        #     print('init validation rendering ...')
+        #     Path(f'data/vis_val/{self.cfg["name"]}').mkdir(exist_ok=True, parents=True)
+        #     self.eval()
+        #     self.cuda()
+        #     for vi in tqdm(range(self.val_num)):
+        #         outputs = self.validate_step(vi)
+        #         key_name = 'pixel_colors_nr_fine' if self.cfg['use_hierarchical_sampling'] else 'pixel_colors_nr'
+        #         img_gt = self.val_imgs_info['imgs'][vi] # 3,h,w
+        #         _, h, w = img_gt.shape
+        #         img_gt = color_map_backward(img_gt.permute(1,2,0).numpy())
+        #         rgb_pr = outputs[key_name].reshape(h, w, 3).cpu().numpy()
+        #         img_pr = color_map_backward(rgb_pr)
+        #         imsave(f'data/vis_val/{self.cfg["name"]}/init-{vi}.jpg',concat_images_list(img_gt,img_pr))
 
     def _init_by_depth(self, ref_id, init_net):
         # init by depth

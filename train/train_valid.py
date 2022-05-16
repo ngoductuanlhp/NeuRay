@@ -6,14 +6,49 @@ from tqdm import tqdm
 
 from network.metrics import name2key_metrics
 from train.train_tools import to_cuda
+from utils.base_utils import load_cfg, to_cuda, color_map_backward, make_dir
+from skimage.io import imsave
 
+def save_renderings(output_dir, qi, render_info, h, w, save_fine_only=False):
+    def output_image(suffix):
+        if f'pixel_colors_{suffix}' in render_info:
+            render_image = color_map_backward(render_info[f'pixel_colors_{suffix}'].cpu().numpy().reshape([h, w, 3]))
+            imsave(f'{output_dir}/{qi}-{suffix}.jpg', render_image)
+
+    if not save_fine_only:
+        output_image('nr')
+    output_image('nr_fine')
+
+def save_depth(output_dir, qi, render_info, h, w, depth_range, gt_depth=None):
+    suffix='fine'
+    # if f'render_depth_consistent_{suffix}' in render_info:
+    #     depth = render_info[f'render_depth_consistent_{suffix}'].cpu().numpy().reshape([h, w])
+    #     if gt_depth is not None:
+    #         mask_depth = (gt_depth > 0)
+    #         print('consistent depth quality', np.mean(np.abs(gt_depth[mask_depth] - depth[mask_depth])))
+    #     near, far = depth_range
+    #     depth = np.clip(depth, a_min=near, a_max=far)
+    #     depth = (1/depth - 1/near)/(1/far - 1/near)
+    #     depth = color_map_backward(depth)
+    #     imsave(f'{output_dir}/{qi}-render_depth_consistent-{suffix}-depth.png', depth)
+        
+
+    if f'render_depth_{suffix}' in render_info:
+        depth = render_info[f'render_depth_{suffix}'].cpu().numpy().reshape([h, w])
+        if gt_depth is not None:
+            print('nerf depth quality', np.mean(np.abs(gt_depth[mask_depth] - depth[mask_depth])))
+        near, far = depth_range
+        depth = np.clip(depth, a_min=near, a_max=far)
+        depth = (1/depth - 1/near)/(1/far - 1/near)
+        depth = color_map_backward(depth)
+        imsave(f'{output_dir}/{qi}-render_depth{suffix}-depth.png', depth)
 
 class ValidationEvaluator:
     def __init__(self,cfg):
         self.key_metric_name=cfg['key_metric_name']
         self.key_metric=name2key_metrics[self.key_metric_name]
 
-    def __call__(self, model, losses, eval_dataset, step, model_name, val_set_name=None):
+    def __call__(self, model, losses, eval_dataset, step, model_name, val_set_name=None, save_dir=None):
         if val_set_name is not None: model_name=f'{model_name}-{val_set_name}'
         model.eval()
         eval_results={}
@@ -34,6 +69,13 @@ class ValidationEvaluator:
                             eval_results[k].append(v)
                         else:
                             eval_results[k]=[v]
+
+                if save_dir:
+                    _, _, h, w = outputs['que_imgs_info']['imgs'].shape
+                    save_renderings(save_dir, data_i, outputs, h, w, save_fine_only=True)
+
+                    que_depth_ranges = outputs['que_imgs_info']['depth_range'][0].cpu().detach().numpy()
+                    save_depth(save_dir, data_i, outputs, h, w, que_depth_ranges)
 
         for k,v in eval_results.items():
             eval_results[k]=np.concatenate(v,axis=0)
