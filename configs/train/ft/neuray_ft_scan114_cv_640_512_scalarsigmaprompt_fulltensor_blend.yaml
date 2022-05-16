@@ -1,4 +1,4 @@
-name: neuray_ft_scan114_cv_640_512_scalarsigmaprompt_fulltensor_blend
+name: neuray_ft_scan114_cv_640_512_scalarsigmaprompt_fulltensor_blend_debug
 
 # network
 network: neuray_ft

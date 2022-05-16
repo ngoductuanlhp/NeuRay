@@ -80,18 +80,26 @@ class ValidationEvaluator:
 
                     # consistent_weights = outputs['consistent_weights'].cpu().detach().numpy()[0].reshape(512,640,64)
                     # que_depth = outputs['que_depth'].cpu().detach().numpy()[0].reshape(512,640,64)
-                    # rgb_feat_sum = outputs['rgb_feat_sum'].cpu().detach().numpy()[0].reshape(512,640,64, 7, 7)
-                    # pk_dict = {'consistent_weights': consistent_weights,
-                    #     'que_depth': que_depth,
-                    #     'rgb_feat_sum': rgb_feat_sum
-                    # }
+                    # # rgb_feat_sum = outputs['rgb_feat_sum'].cpu().detach().numpy()[0].reshape(512,640,64, 7, 7)
+                    # prj_pts = outputs['prj_pts'].cpu().detach().numpy()[0].reshape(512,640,64, 7, -1)
+                    # prj_rgb = outputs['prj_rgb'].cpu().detach().numpy()[0].reshape(512,640,64, 7, -1)
+                    prj_img_feats = outputs['prj_img_feats'].numpy()[0].reshape(512,640,64, 7, -1)
 
-                    # with open(f'{save_dir}/consis_weight_cosin.pkl', 'wb') as handle:
-                    #     pickle.dump(pk_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                    # # print('consistent_weights', consistent_weights.shape)
-                    # # save_path = f'{save_dir}/consis_weight.np'
-                    # # np.save(save_path, consistent_weights)
-                    # quit()
+                    pk_dict = {
+                        # 'consistent_weights': consistent_weights,
+                        # 'que_depth': que_depth,
+                        # 'rgb_feat_sum': rgb_feat_sum,
+                        # 'prj_pts': prj_pts,
+                        # 'prj_rgb': prj_rgb,
+                        'prj_img_feats' : prj_img_feats
+                    }
+
+                    with open(f'{save_dir}/consis_weight_cosin_detail2.pkl', 'wb') as handle:
+                        pickle.dump(pk_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                    # print('consistent_weights', consistent_weights.shape)
+                    # save_path = f'{save_dir}/consis_weight.np'
+                    # np.save(save_path, consistent_weights)
+                    quit()
 
                     save_renderings(save_dir, data_i, outputs, h, w, save_fine_only=True)
 

@@ -99,30 +99,30 @@ class Trainer:
         best_para,start_step=self._load_model()
         train_iter=iter(self.train_set)
 
-            # # NOTE eval at begin
+        # NOTE eval at begin
 
-            # print('NOTEEEEEE: eval at begin')
-            # step = 0
-            # torch.cuda.empty_cache()
-            # val_results={}
-            # val_para = 0
-            # for vi, val_set in enumerate(self.val_set_list):
-            #     output_dir = os.path.join(self.model_dir, 'render_{}'.format(str(step+1)))
-            #     make_dir(output_dir)
-            #     val_results_cur, val_para_cur = self.val_evaluator(
-            #         self.network, self.val_losses + self.val_metrics, val_set, step,
-            #         self.model_name, val_set_name=self.val_set_names[vi], save_dir=output_dir)
-            #     for k,v in val_results_cur.items():
-            #         val_results[f'{self.val_set_names[vi]}-{k}'] = v
-            #     # always use the final val set to select model!
-            #     val_para = val_para_cur
+        print('NOTEEEEEE: eval at begin')
+        step = 0
+        torch.cuda.empty_cache()
+        val_results={}
+        val_para = 0
+        for vi, val_set in enumerate(self.val_set_list):
+            output_dir = os.path.join(self.model_dir, 'render_{}'.format(str(step+1)))
+            make_dir(output_dir)
+            val_results_cur, val_para_cur = self.val_evaluator(
+                self.network, self.val_losses + self.val_metrics, val_set, step,
+                self.model_name, val_set_name=self.val_set_names[vi], save_dir=output_dir)
+            for k,v in val_results_cur.items():
+                val_results[f'{self.val_set_names[vi]}-{k}'] = v
+            # always use the final val set to select model!
+            val_para = val_para_cur
 
-            # if val_para>best_para:
-            #     print(f'New best model {self.cfg["key_metric_name"]}: {val_para:.5f} previous {best_para:.5f}')
-            #     best_para=val_para
-            #     self._save_model(step+1,best_para,self.best_pth_fn)
-            # self._log_data(val_results,step+1,'val')
-            # del val_results, val_para, val_para_cur, val_results_cur
+        if val_para>best_para:
+            print(f'New best model {self.cfg["key_metric_name"]}: {val_para:.5f} previous {best_para:.5f}')
+            best_para=val_para
+            self._save_model(step+1,best_para,self.best_pth_fn)
+        self._log_data(val_results,step+1,'val')
+        del val_results, val_para, val_para_cur, val_results_cur
 
         pbar=tqdm(total=self.cfg['total_step'],bar_format='{r_bar}')
         pbar.update(start_step)

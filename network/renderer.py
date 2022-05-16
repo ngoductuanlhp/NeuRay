@@ -167,15 +167,15 @@ class NeuralRayBaseRenderer(nn.Module):
 
     def network_rendering(self, prj_dict, que_dir, is_fine, prompt):
         if is_fine:
-            density, colors, mean_hit_prob, gt_ibr, consistent_weights = self.fine_agg_net(prj_dict, que_dir, prompt)
+            density, colors, mean_hit_prob, gt_ibr, consistent_weights, rgb_feat_sum = self.fine_agg_net(prj_dict, que_dir, prompt)
         else:
-            density, colors, mean_hit_prob, gt_ibr, consistent_weights = self.agg_net(prj_dict, que_dir, prompt)
+            density, colors, mean_hit_prob, gt_ibr, consistent_weights, rgb_feat_sum = self.agg_net(prj_dict, que_dir, prompt)
 
         alpha_values = 1.0 - torch.exp(-torch.relu(density))
         hit_prob = alpha_values2hit_prob(alpha_values)
         pixel_colors = torch.sum(hit_prob.unsqueeze(-1)*colors,2)
         # breakpoint()
-        return hit_prob, colors, pixel_colors, alpha_values, mean_hit_prob, gt_ibr, consistent_weights
+        return hit_prob, colors, pixel_colors, alpha_values, mean_hit_prob, gt_ibr, consistent_weights, rgb_feat_sum
 
     def compute_prompt_feat(self, que_pts, que_dir, prompt_feats):
         # prompt_feats 1 x 1 x H x W x D
@@ -242,7 +242,7 @@ class NeuralRayBaseRenderer(nn.Module):
         # outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr,\
         #         'm_hit_prob': m_hit_prob, 'out_ibr': out_ibr, 'out_prompt': out_prompt}
 
-        hit_prob_nr, colors_nr, pixel_colors_nr, alpha_values, mean_hit_prob, gt_ibr, consistent_weights = self.network_rendering(prj_dict, que_dir, is_fine, prompt)
+        hit_prob_nr, colors_nr, pixel_colors_nr, alpha_values, mean_hit_prob, gt_ibr, consistent_weights, rgb_feat_sum = self.network_rendering(prj_dict, que_dir, is_fine, prompt)
         outputs = {'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr,\
                 # 'm_hit_prob': mean_hit_prob, 
                 # 'out_ibr': gt_ibr.unsqueeze(0)
@@ -250,10 +250,14 @@ class NeuralRayBaseRenderer(nn.Module):
 
         # NOTE add prompt params
             # outputs['alpha_values'] = alpha_values
-            # outputs['consistent_weights'] = consistent_weights
-            # outputs['que_depth'] = que_depth
-
+        # outputs['consistent_weights'] = consistent_weights
+        # outputs['que_depth'] = que_depth
         # outputs['rgb_feat_sum'] = rgb_feat_sum
+
+        # outputs['prj_pts'] = prj_dict['pts'].permute(1,2,3,0,-1) # qn,rn,dn, ref_views, channel
+        # outputs['prj_rgb'] = prj_dict['rgb'].permute(1,2,3,0,-1)
+        outputs['prj_img_feats'] = prj_dict['img_feats'].permute(1,2,3,0,-1)[:, :, :, :, :].clone().detach().cpu()
+
         # hit_prob_consist = alpha_values2hit_prob(consistent_weights)
         # outputs['render_depth_consistent'] = torch.sum(hit_prob_consist * que_depth, -1) # qn,rn
         # max_weight_inds = torch.max(consistent_weights, dim=-1)[1]
@@ -592,7 +596,10 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         return ref_imgs_info, que_imgs_info
 
     def validate_step(self, val_idx):
+        
         ref_idx = self.val_dist_idx[val_idx][:self.cfg['neighbor_view_num']]
+
+        print('ref_idx', ref_idx)
         ref_imgs_info, que_imgs_info = self.slice_imgs_info(ref_idx, val_idx, False)
 
         with torch.no_grad():

@@ -336,11 +336,19 @@ class IBRNetWithNeuRay(nn.Module):
         rgb_feat1 = rgb_feat[:, :, :, None, :].repeat(1,1,1,num_views,1)  # [n_rays, n_samples, n_views, n_views, n_feat]
         rgb_feat2 = rgb_feat[:, :, None, :, :].repeat(1,1,num_views,1,1)  # [n_rays, n_samples, n_views, n_views, n_feat]
 
+        # breakpoint()
         # rgb_feat_mat = rgb_feat1 *rgb_feat2
         # rgb_feat_sum = torch.sum(rgb_feat1 * rgb_feat2, dim =-1)
-        rgb_feat_sum = F.cosine_similarity(rgb_feat1, rgb_feat2, dim=-1)
-        mask_rgb_feat_sum = torch.eye(num_views)[None, None, ...].type(torch.bool).to(rgb_feat_sum.device).repeat(rgb_feat_sum.shape[0], rgb_feat_sum.shape[1], 1, 1)
-        rgb_feat_sum[mask_rgb_feat_sum] = -1e8
+        rgb_feat_sum = F.cosine_similarity(rgb_feat1, rgb_feat2, dim=-1) # [n_rays, n_samples, n_views, n_views]
+
+        # NOTE make cosin of invalid points to -1
+        valid_ray = (torch.sum(mask.squeeze(-1), dim=-1) > 1).type(torch.bool) # [n_rays, n_samples] # at least valid in 2 views
+        rgb_feat_sum[~valid_ray] = -1
+
+        # breakpoint()
+
+        mask_rgb_feat_sum = torch.eye(num_views)[None, None, ...].type(torch.bool).to(rgb_feat_sum.device).repeat(rgb_feat_sum.shape[0], rgb_feat_sum.shape[1], 1, 1).type(torch.bool)
+        rgb_feat_sum[mask_rgb_feat_sum] = -1e8 # [n_rays, n_samples, n_views, n_views]
         #rgb_feat_exp = torch.exp(rgb_feat_sum) # [n_rays, n_samples, n_views, n_views]
         # rgb_feat_exp_mean_row = torch.mean(rgb_feat_exp, dim=3) # [n_rays, n_samples, n_views]
         # rgb_feat_exp_mean_total = torch.mean(rgb_feat_exp_mean_row, dim=2)
@@ -348,8 +356,10 @@ class IBRNetWithNeuRay(nn.Module):
         #rgb_feat_exp_sum_total = torch.sum(rgb_feat_exp_sum_row, dim=2)
         # rgb_feat_max = torch.max(rgb_feat_sum,dim=[2,3])[0]
         rgb_feat_max = torch.max(rgb_feat_sum.reshape(rgb_feat_sum.shape[0], rgb_feat_sum.shape[1], -1),dim =-1 )[0]
-        # rgb_feat_max = (rgb_feat_max + 1) / 2
+        rgb_feat_max = (rgb_feat_max + 1) / 2
         # rgb_feat_max = F.sigmoid(rgb_feat_max) # 0->1
+
+        # breakpoint()
 
         rgb_feat_exp_sum_total = rgb_feat_max
         assert torch.all(rgb_feat_max >=0) and torch.all(rgb_feat_max <= 1)
@@ -457,4 +467,4 @@ class IBRNetWithNeuRay(nn.Module):
         # consistent_weights = rgb_feat_exp_sum_total
 
         # return out1, gt_ibr, consistent_weights, rgb_feat_sum
-        return out1, gt_ibr, rgb_feat_exp_sum_total
+        return out1, gt_ibr, rgb_feat_exp_sum_total, rgb_feat_sum
