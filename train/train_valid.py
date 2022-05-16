@@ -60,7 +60,7 @@ class ValidationEvaluator:
             with torch.no_grad():
                 outputs=model(data)
                 for loss in losses:
-                    loss_results=loss(outputs, data, step, data_index=data_i, model_name=model_name)
+                    loss_results = loss(outputs, data, step, data_index=data_i, model_name=model_name)
                     for k,v in loss_results.items():
                         if type(v)==torch.Tensor:
                             v=v.detach().cpu().numpy()

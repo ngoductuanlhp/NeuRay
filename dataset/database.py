@@ -141,7 +141,6 @@ class DTUMVSTestSparseDatabase(BaseDatabase):
         if self.background=='black':
             mask = self.get_mask(img_id)
             img = img * mask.astype(np.uint8)[:,:,None]
-            
         self.img_id2imgs[img_id]=img
         return img
 
@@ -1273,10 +1272,17 @@ def get_database_split(database: BaseDatabase, split_type='val'):
         elif database_name.startswith('llff'):
             val_ids = database.get_img_ids()[::8]
             train_ids = [img_id for img_id in database.get_img_ids(check_depth_exist=depth_valid) if img_id not in val_ids]
+        # elif database_name.startswith('ss_dtu_test_sparse'):
+        #     train_ids = [6, 10, 15, 20, 29, 32, 35]
+        #     bad_ids = [3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 36, 37, 38, 39]
+        #     val_ids = [1, 8, 12, 27, 34, 41, 46]
+            # val_ids = [int(img_id) for img_id in database.get_img_ids(check_depth_exist=depth_valid) if int(img_id) not in train_ids and int(img_id) not in bad_ids]
+        
         elif database_name.startswith('dtu_test_sparse'):
             train_ids = [6, 10, 15, 20, 29, 32, 35]
             bad_ids = [3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 36, 37, 38, 39]
-            val_ids = [int(img_id) for img_id in database.get_img_ids(check_depth_exist=depth_valid) if int(img_id) not in train_ids and int(img_id) not in bad_ids]
+            val_ids = [1, 8, 12, 27, 34, 41, 46]
+            # val_ids = [int(img_id) for img_id in database.get_img_ids(check_depth_exist=depth_valid) if int(img_id) not in train_ids and int(img_id) not in bad_ids]
         elif database_name.startswith('dtu_test'):
             val_ids = database.get_img_ids()[3:-3:8]
             train_ids = [img_id for img_id in database.get_img_ids(check_depth_exist=depth_valid) if img_id not in val_ids]
@@ -1294,10 +1300,15 @@ def get_database_split(database: BaseDatabase, split_type='val'):
         elif database_name.startswith('llff'):
             val_ids = database.get_img_ids()[::8]
             train_ids = [img_id for img_id in database.get_img_ids(check_depth_exist=depth_valid) if img_id not in val_ids]
+        # elif database_name.startswith('ss_dtu_test_sparse'):
+        #     train_ids = [6, 10, 15, 20, 29, 32, 35]
+        #     bad_ids = [3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 36, 37, 38, 39]
+        #     val_ids = [1, 8, 12, 27, 34, 41, 46]
         elif database_name.startswith('dtu_test_sparse'):
             train_ids = [6, 10, 15, 20, 29, 32, 35]
             bad_ids = [3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 36, 37, 38, 39]
-            val_ids = [int(img_id) for img_id in database.get_img_ids(check_depth_exist=depth_valid) if int(img_id) not in train_ids and int(img_id) not in bad_ids]
+            val_ids = [1, 8, 12, 27, 34, 41, 46]
+            # val_ids = [int(img_id) for img_id in database.get_img_ids(check_depth_exist=depth_valid) if int(img_id) not in train_ids and int(img_id) not in bad_ids]
         elif database_name.startswith('dtu_test'):
             # val_ids = database.get_img_ids()[3:-3:8]
             val_ids = [0, 2, 25, 39, 46]

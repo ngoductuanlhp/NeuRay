@@ -143,6 +143,20 @@ def project_points_dict(ref_imgs_info, que_pts):
         prj_dict[k]=v.reshape(rfn,qn,rn,dn,-1)
     return prj_dict
 
+def project_points_dict_rgb(ref_imgs_info, que_pts):
+    # project all points
+    qn, rn, dn, _ = que_pts.shape
+    prj_dir, prj_pts, prj_depth, prj_mask = project_points_ref_views(ref_imgs_info, que_pts.reshape([qn * rn * dn, 3]))
+    rfn, _, h, w = ref_imgs_info['imgs'].shape
+    # prj_ray_feats = interpolate_feature_map(ref_imgs_info['ray_feats'], prj_pts, prj_mask, h, w)
+    prj_rgb = interpolate_feature_map(ref_imgs_info['imgs'], prj_pts, prj_mask, h, w)
+    prj_dict = {'dir':prj_dir, 'pts':prj_pts, 'depth':prj_depth, 'mask': prj_mask.float(), 'rgb':prj_rgb}
+
+    # post process
+    for k, v in prj_dict.items():
+        prj_dict[k]=v.reshape(rfn,qn,rn,dn,-1)
+    return prj_dict
+
 def sample_depth(depth_range, coords, sample_num, random_sample):
     """
     :param depth_range: qn,2

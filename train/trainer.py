@@ -50,9 +50,10 @@ class Trainer:
         self.network=name2network[self.cfg['network']](self.cfg).cuda()
 
         # loss
-        self.val_losses = []
+        losses = []
         for loss_name in self.cfg['loss']:
-            self.val_losses.append(name2loss[loss_name](self.cfg))
+            losses.append(name2loss[loss_name](self.cfg))
+
         self.val_metrics = []
 
         # metrics
@@ -69,8 +70,12 @@ class Trainer:
             # self.train_network=DataParallel(MultiGPUWrapper(self.network,self.val_losses))
             # self.train_losses=[DummyLoss(self.val_losses)]
         else:
-            self.train_network=self.network
-            self.train_losses=self.val_losses
+            self.train_network=  self.network
+            self.train_losses = losses
+
+        self.val_losses = []
+        for loss_name in self.cfg['val_loss']:
+            self.val_losses.append(name2loss[loss_name](self.cfg))
 
         if self.cfg['optimizer_type']=='adam':
             self.optimizer = Adam
@@ -129,11 +134,17 @@ class Trainer:
             loss=0
             for k,v in log_info.items():
                 if k.startswith('loss'):
-                    loss=loss+torch.mean(v)
+                    mean_val = torch.mean(v)
+                    loss=loss+mean_val
+                    # print(f'loss {k}: {mean_val}')
+
+
+            # print('loss loss_rgb_nr_virtual', log_info['loss_rgb_nr_virtual'])
 
             loss.backward()
             self.optimizer.step()
             if ((step+1) % self.cfg['train_log_step']) == 0:
+                # print('loss loss_rgb_nr_virtual', log_info['loss_rgb_nr_virtual'])
                 self._log_data(log_info,step+1,'train')
 
             if (step+1)%self.cfg['val_interval']==0 or (step+1)==self.cfg['total_step']:
@@ -150,7 +161,7 @@ class Trainer:
                         val_results[f'{self.val_set_names[vi]}-{k}'] = v
                     # always use the final val set to select model!
                     val_para = val_para_cur
-
+                print(f'At step {step+1}, {self.cfg["key_metric_name"]}: {val_para_cur:.5f}')
                 if val_para>best_para:
                     print(f'New best model {self.cfg["key_metric_name"]}: {val_para:.5f} previous {best_para:.5f}')
                     best_para=val_para

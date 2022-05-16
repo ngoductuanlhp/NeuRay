@@ -57,10 +57,12 @@ class RenderLoss(Loss):
     def __call__(self, data_pr, data_gt, step, **kwargs):
         rgb_gt = data_pr['pixel_colors_gt'] # 1,rn,3
         rgb_nr = data_pr['pixel_colors_nr'] # 1,rn,3
-        def compute_loss(rgb_pr,rgb_gt):
+        def compute_loss(rgb_pr, rgb_gt, fine=False):
             loss=torch.sum((rgb_pr-rgb_gt)**2,-1)        # b,n
+
             if self.cfg['use_ray_mask']:
-                ray_mask = data_pr['ray_mask'].float() # 1,rn
+                # ray_mask = data_pr['ray_mask_fine'].float() if fine else data_pr['ray_mask'].float()# 1,rn
+                ray_mask = data_pr['ray_mask'].float()
                 loss = torch.sum(loss*ray_mask,1)/(torch.sum(ray_mask,1)+1e-3)
             else:
                 loss = torch.mean(loss, 1)
@@ -73,7 +75,7 @@ class RenderLoss(Loss):
         if self.cfg['use_dr_fine_loss']:
             results['loss_rgb_dr_fine'] = compute_loss(data_pr['pixel_colors_dr_fine'], rgb_gt)
         if self.cfg['use_nr_fine_loss']:
-            results['loss_rgb_nr_fine'] = compute_loss(data_pr['pixel_colors_nr_fine'], rgb_gt)
+            results['loss_rgb_nr_fine'] = compute_loss(data_pr['pixel_colors_nr_fine'], rgb_gt, fine=True)
         return results
 
 class DepthLoss(Loss):
@@ -131,8 +133,42 @@ class DepthLoss(Loss):
             outputs['loss_depth_fine'] = compute_loss(data_pr['depth_mean_fine'])
         return outputs
 
+class VirtualRenderLoss(Loss):
+    default_cfg={
+        'use_ray_mask': True,
+        'use_nr_fine_loss': False,
+    }
+    def __init__(self, cfg):
+        self.cfg={**self.default_cfg,**cfg}
+        super().__init__([f'loss_rgb_virtual'])
+
+    def __call__(self, data_pr, data_gt, step, **kwargs):
+        rgb_gt = data_pr['virtual_pixel_colors_gt'] # 1,rn,3
+        rgb_nr = data_pr['virtual_pixel_colors_nr'] # 1,rn,3
+
+        def compute_loss_virtual(rgb_pr, rgb_gt, fine=False):
+            loss=torch.sum((rgb_pr-rgb_gt)**2,-1)        # b,n
+
+            if self.cfg['use_ray_mask']:
+                # ray_mask = data_pr['virtual_pixel_mask_fine'].float() if fine else data_pr['virtual_pixel_mask'].float()# 1,rn
+                ray_mask = data_pr['virtual_pixel_mask'].float()
+                loss = torch.sum(loss*ray_mask,1)/(torch.sum(ray_mask,1)+1e-3)
+            else:
+                loss = torch.mean(loss, 1)
+            return loss
+
+        results = {'loss_rgb_nr_virtual': compute_loss_virtual(rgb_nr, rgb_gt)}
+        if self.cfg['use_nr_fine_loss']:
+            results['loss_rgb_nr_fine_virtual'] = compute_loss_virtual(data_pr['virtual_pixel_colors_nr_fine'], rgb_gt, fine=True)
+        
+        # print('debug', results['loss_rgb_nr_virtual'].shape)
+        # if self.cfg['use_nr_fine_loss']:
+        #     results['loss_rgb_nr_fine'] = compute_loss_virtual(data_pr['pixel_colors_nr_fine'], rgb_gt, fine=True)
+        return results
+
 name2loss={
     'render': RenderLoss,
+    'virtual_render': VirtualRenderLoss,
     'depth': DepthLoss,
     'consist': ConsistencyLoss,
 }

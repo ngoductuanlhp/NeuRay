@@ -48,7 +48,7 @@ class NeuralRayBaseRenderer(nn.Module):
         'ray_mask_view_num': 2,
         'ray_mask_point_num': 8,
 
-        'render_depth': True,
+        'render_depth': False,
     }
     def __init__(self,cfg):
         super().__init__()
@@ -196,6 +196,44 @@ class NeuralRayBaseRenderer(nn.Module):
         # pixel_colors = torch.index_select(colors, 2, min_inds_depth.unsqueeze(-1))
         return hit_prob, colors, pixel_colors
 
+    def render_by_depth_virtual(self, que_depth, que_imgs_info, ref_imgs_info, is_train, is_fine, debug=False):
+        ref_imgs_info = ref_imgs_info.copy()
+        que_imgs_info = que_imgs_info.copy()
+        que_dists = depth2inv_dists(que_depth, que_imgs_info['depth_range'])
+        que_pts, que_dir = depth2points(que_imgs_info, que_depth)
+
+        prj_dict = project_points_dict(ref_imgs_info, que_pts)
+        prj_dict = self.predict_proj_ray_prob(prj_dict, ref_imgs_info, que_dists, is_fine)
+        prj_dict = self.get_img_feats(ref_imgs_info, prj_dict)
+
+        hit_prob_nr, colors_nr, pixel_colors_nr = self.network_rendering(prj_dict, que_dir, is_fine)
+
+        outputs={'virtual_pixel_colors_nr': pixel_colors_nr, 'virtual_hit_prob_nr': hit_prob_nr}
+
+        virtual_depth = torch.sum(hit_prob_nr.detach() * que_depth, -1, keepdim=True) # qn,rn,1
+        virtual_pts, virtual_dir = depth2points(que_imgs_info, virtual_depth)
+        virtual_prj_dict = project_points_dict_rgb(ref_imgs_info, virtual_pts)
+
+        rgb = virtual_prj_dict['rgb'].squeeze(3).permute(1,2,3,0) # (qn, rn, -1, rfn)
+        # rgb = rgb.squeeze(3)  # (rfn,qn,rn,-1)
+        # rgb = rgb.squeeze(3).permute(1,2,3,0) # (qn, rn, -1, rfn)
+        mask = virtual_prj_dict['mask'].squeeze(3).permute(1,2,3,0).type(torch.float) # (qn, rn, -1, rfn)
+
+        mix_rgb = torch.sum(rgb * mask, dim=-1) / (torch.sum(mask, dim=-1) + 1e-3) # (qn, rn, -1,
+        # qn, rn, 3
+        outputs['virtual_pixel_colors_gt'] = mix_rgb.detach()
+
+        virtual_mask = torch.sum(mask.int(), -1) > self.cfg['ray_mask_view_num'] # qn,rn,1
+
+        # print('debug mask', torch.sum(virtual_mask), torch.numel(virtual_mask))
+        # virtual_mask = virtual_mask & (virtual_depth >= que_imgs_info['depth_range'][:, 0]) & (virtual_depth <= que_imgs_info['depth_range'][:, 1])
+        outputs['virtual_pixel_mask'] = virtual_mask.squeeze(-1)
+
+        # if self.cfg['render_depth']:
+        #     # qn,rn,dn
+        #     outputs['render_depth'] = torch.sum(hit_prob_nr * que_depth, -1) # qn,rn
+        return outputs
+    
     def render_by_depth(self, que_depth, que_imgs_info, ref_imgs_info, is_train, is_fine, debug=False):
         ref_imgs_info = ref_imgs_info.copy()
         que_imgs_info = que_imgs_info.copy()
@@ -213,12 +251,6 @@ class NeuralRayBaseRenderer(nn.Module):
             hit_prob_nr, colors_nr, pixel_colors_nr = self.network_rendering(prj_dict, que_dir, is_fine)
 
         outputs={'pixel_colors_nr': pixel_colors_nr, 'hit_prob_nr': hit_prob_nr}
-
-        # direct rendering
-        if self.cfg['use_dr_prediction']:
-            hit_prob_dr, colors_dr, pixel_colors_dr = self.direct_rendering(prj_dict, que_dir, colors_nr)
-            outputs['pixel_colors_dr'] = pixel_colors_dr
-            outputs['hit_prob_dr'] = hit_prob_dr
 
         # predict query hit prob
         if is_train and self.cfg['use_self_hit_prob']:
@@ -238,7 +270,7 @@ class NeuralRayBaseRenderer(nn.Module):
             outputs['render_depth'] = torch.sum(hit_prob_nr * que_depth, -1) # qn,rn
         return outputs
 
-    def fine_render_impl(self, coarse_render_info, que_imgs_info, ref_imgs_info, is_train, debug=False):
+    def fine_render_impl(self, coarse_render_info, que_imgs_info, ref_imgs_info, is_train, debug=False, is_virtual=False):
         fine_depth = sample_fine_depth(coarse_render_info['depth'], coarse_render_info['hit_prob'].detach(),
                                        que_imgs_info['depth_range'], self.cfg['fine_depth_sample_num'], is_train)
 
@@ -247,16 +279,27 @@ class NeuralRayBaseRenderer(nn.Module):
             que_depth = torch.sort(torch.cat([coarse_render_info['depth'], fine_depth], -1), -1)[0]
         else:
             que_depth = torch.sort(fine_depth, -1)[0]
-        outputs = self.render_by_depth(que_depth, que_imgs_info, ref_imgs_info, is_train, True, debug=debug)
+
+        if is_virtual:
+            outputs = self.render_by_depth_virtual(que_depth, que_imgs_info, ref_imgs_info, is_train, True, debug=debug)
+        else:
+            outputs = self.render_by_depth(que_depth, que_imgs_info, ref_imgs_info, is_train, True, debug=debug)
+
         return outputs
 
-    def render_impl(self, que_imgs_info, ref_imgs_info, is_train, debug=False):
+    def render_impl(self, que_imgs_info, ref_imgs_info, is_train, debug=False, is_virtual=False):
         # [qn,rn,dn]
         que_depth, _ = sample_depth(que_imgs_info['depth_range'], que_imgs_info['coords'], self.cfg['depth_sample_num'], False)
-        outputs = self.render_by_depth(que_depth, que_imgs_info, ref_imgs_info, is_train, False, debug=debug)
+        if is_virtual:
+            outputs = self.render_by_depth_virtual(que_depth, que_imgs_info, ref_imgs_info, is_train, False, debug=debug)
+        else:
+            outputs = self.render_by_depth(que_depth, que_imgs_info, ref_imgs_info, is_train, False, debug=debug)
         if self.cfg['use_hierarchical_sampling']:
-            coarse_render_info= {'depth': que_depth, 'hit_prob': outputs['hit_prob_nr']}
-            fine_outputs = self.fine_render_impl(coarse_render_info, que_imgs_info, ref_imgs_info, is_train, debug=debug)
+            if is_virtual:
+                coarse_render_info= {'depth': que_depth, 'hit_prob': outputs['virtual_hit_prob_nr']}
+            else:
+                coarse_render_info= {'depth': que_depth, 'hit_prob': outputs['hit_prob_nr']}
+            fine_outputs = self.fine_render_impl(coarse_render_info, que_imgs_info, ref_imgs_info, is_train, debug=debug, is_virtual=is_virtual)
             for k, v in fine_outputs.items():
                 outputs[k + "_fine"] = v
         return outputs
@@ -283,6 +326,40 @@ class NeuralRayBaseRenderer(nn.Module):
             if debug:
                 que_imgs_info['depth'] = depth[:,:,ray_id:ray_id+ray_batch_num]
             render_info = self.render_impl(que_imgs_info,ref_imgs_info,is_train, debug=debug)
+            output_keys = [k for k in render_info.keys() if is_train or (not k.startswith('hit_prob'))]
+            for k in output_keys:
+                v = render_info[k]
+                if k not in render_info_all:
+                    render_info_all[k]=[]
+                render_info_all[k].append(v)
+
+        for k, v in render_info_all.items():
+            render_info_all[k]=torch.cat(v,1)
+
+        return render_info_all, ref_img_feats
+
+    def render_virtual(self, virtual_imgs_info, ref_imgs_info, is_train, debug=False):
+        # ref_img_feats = self.image_encoder(ref_imgs_info['imgs'])
+        # ref_imgs_info['img_feats'] = ref_img_feats
+        # ref_imgs_info['ray_feats'] = self.vis_encoder(ref_imgs_info['ray_feats'], ref_img_feats)
+
+        # if is_train and self.cfg['use_self_hit_prob']:
+        #     que_img_feats = self.image_encoder(que_imgs_info['imgs'])
+        #     que_imgs_info['ray_feats'] = self.vis_encoder(que_imgs_info['ray_feats'], que_img_feats)
+
+        ray_batch_num = self.cfg["ray_batch_num"]
+        coords = virtual_imgs_info['coords']
+        # if debug:
+        #     depth = que_imgs_info['depth']
+        #     depth = depth.reshape(depth.shape[0], depth.shape[1], -1)
+        ray_num = coords.shape[1]
+        render_info_all = {}
+        for ray_id in range(0, ray_num, ray_batch_num):
+            virtual_imgs_info['coords'] = coords[:,ray_id:ray_id+ray_batch_num]
+
+            # if debug:
+            #     que_imgs_info['depth'] = depth[:,:,ray_id:ray_id+ray_batch_num]
+            render_info = self.render_impl(virtual_imgs_info, ref_imgs_info, is_train, debug=debug, is_virtual=True)
             output_keys = [k for k in render_info.keys() if is_train or (not k.startswith('hit_prob'))]
             for k in output_keys:
                 v = render_info[k]
@@ -407,6 +484,12 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         self.ref_ids, self.val_ids = get_database_split(self.database, self.cfg['database_split_type'])
         self.ref_ids = np.asarray(self.ref_ids)
 
+        # train_ids = [6, 10, 15, 20, 29, 32, 35]
+        # bad_ids = [3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 36, 37, 38, 39]
+        # val_ids = [1, 8, 12, 27, 34, 41, 46]
+
+        
+
         # build imgs_info
         self.ref_dist_idx = compute_nearest_camera_indices(self.database, self.ref_ids) # rfn,rfn
         ref_imgs_info = build_imgs_info(self.database, self.ref_ids, self.cfg['ref_pad_interval'], True, replace_none_depth=True)
@@ -415,11 +498,21 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
             ref_imgs_info['depth_range'][:, 1] = np.max(ref_imgs_info['depth_range'])
         self.ref_imgs_info = imgs_info_to_torch(ref_imgs_info)
 
+        # NOTE add virtual ref_ids
+        self.virtual_ids = np.asarray([0, 2, 9, 11, 13, 14, 22, 23, 24, 25, 26, 28, 30, 31, 33, 40, 42, 43, 44, 45, 47, 48])
+        virtual_imgs_info = build_imgs_info(self.database, self.virtual_ids, self.cfg['ref_pad_interval'], True, replace_none_depth=True)
+        if self.cfg['use_consistent_depth_range']:
+            virtual_imgs_info['depth_range'][:, 0] = ref_imgs_info['depth_range'][0, 0]
+            virtual_imgs_info['depth_range'][:, 1] = ref_imgs_info['depth_range'][0, 1]
+        self.virtual_imgs_info = imgs_info_to_torch(virtual_imgs_info)
+
         if self.cfg['use_validation']:
             self.val_dist_idx = compute_nearest_camera_indices(self.database, self.val_ids, self.ref_ids)
             val_imgs_info = build_imgs_info(self.database, self.val_ids, -1, True, has_depth=True)
             self.val_imgs_info = imgs_info_to_torch(val_imgs_info)
             self.val_num = len(self.val_ids)
+
+            
 
         # init from generalization model
         self._initialization()
@@ -537,7 +630,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         ref_imgs_info, que_imgs_info = self.slice_imgs_info(ref_idx, val_idx, False)
 
         with torch.no_grad():
-            render_outputs = self.render(que_imgs_info, ref_imgs_info, False)
+            render_outputs, _ = self.render(que_imgs_info, ref_imgs_info, False)
 
         ref_imgs_info.pop('ray_feats')
         ref_imgs_info.pop('img_feats')
@@ -556,13 +649,42 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         ref_imgs_info, que_imgs_info = self.slice_imgs_info(ref_idx, que_i, True)
 
         # render
-        render_outputs = self.render(que_imgs_info.copy(), ref_imgs_info.copy(), True)
+        render_outputs, ref_img_feats = self.render(que_imgs_info.copy(), ref_imgs_info.copy(), True)
+
+        
+
+        # NOTE add virtual ids
+        virtual_id = np.random.randint(0,len(self.virtual_ids))
+
+        virtual_imgs_info = imgs_info_slice(self.virtual_imgs_info, torch.from_numpy(np.asarray([virtual_id])).long())
+        qn, _, hn, wn = que_imgs_info['imgs'].shape
+        coords = np.stack(np.meshgrid(np.arange(wn), np.arange(hn)), -1)
+
+        # coords = coords[256-192:256+192, 320-256:320+256,:]
+        coords = coords.reshape(-1, 2).astype(np.float32)
+        # coords = coords.reshape([1, -1, 2])
+
+        rand_choice = np.random.choice(coords.shape[0], 2048, replace=False)
+        coords = coords[rand_choice, :].reshape(1, 2048, -1)
+
+        virtual_imgs_info['coords'] = torch.from_numpy(coords)
+        virtual_imgs_info = to_cuda(virtual_imgs_info)
+
+        ref_imgs_info['img_feats'] = ref_img_feats
+        virtual_render_outputs = self.render_virtual(virtual_imgs_info.copy(), ref_imgs_info.copy(), True)
+
+        for k in ['virtual_pixel_colors_nr', 'virtual_pixel_colors_gt', 'virtual_pixel_mask',\
+                'virtual_pixel_colors_nr_fine', 'virtual_pixel_colors_gt_fine', 'virtual_pixel_mask_fine']:
+            render_outputs[k] = virtual_render_outputs[k]
+        #########################################
 
         # clear some values for outputs
         ref_imgs_info.pop('ray_feats')
         que_imgs_info.pop('ray_feats')
+        
         if 'img_feats' in ref_imgs_info: ref_imgs_info.pop('img_feats')
         if 'img_feats' in que_imgs_info: que_imgs_info.pop('img_feats')
+        if 'img_feats' in virtual_imgs_info: virtual_imgs_info.pop('img_feats')
         render_outputs.update({'que_imgs_info': que_imgs_info})
         return render_outputs
 
