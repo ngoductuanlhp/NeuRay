@@ -143,19 +143,24 @@ class VirtualRenderLoss(Loss):
         super().__init__([f'loss_rgb_virtual'])
 
     def __call__(self, data_pr, data_gt, step, **kwargs):
-        rgb_gt = data_pr['virtual_pixel_colors_gt'] # 1,rn,3
+        rgb_gt = data_pr['virtual_pixel_colors_gt'] # 1,rn,3, rfn
         rgb_nr = data_pr['virtual_pixel_colors_nr'] # 1,rn,3
 
         def compute_loss_virtual(rgb_pr, rgb_gt, fine=False):
-            loss=torch.sum((rgb_pr-rgb_gt)**2,-1)        # b,n
+            # loss=torch.sum((rgb_pr-rgb_gt)**2,-1)
+            l2_loss = torch.sum((rgb_pr.unsqueeze(-1) - rgb_gt)**2, 2)  # 1, rn, rfn
 
+            temporal = 10.
+            loss = torch.log(torch.sum(torch.exp(l2_loss * temporal), dim=-1)) / temporal
+            # loss = torch.sum((rgb_pr.unsqueeze(-1) - rgb_gt)**2, 2) # 1, rn, rfn
+            # loss = torch.min(loss, -1)[0]
             if self.cfg['use_ray_mask']:
                 # ray_mask = data_pr['virtual_pixel_mask_fine'].float() if fine else data_pr['virtual_pixel_mask'].float()# 1,rn
                 ray_mask = data_pr['virtual_pixel_mask'].float()
                 loss = torch.sum(loss*ray_mask,1)/(torch.sum(ray_mask,1)+1e-3)
             else:
                 loss = torch.mean(loss, 1)
-            return loss
+            return loss * 0.5
 
         results = {'loss_rgb_nr_virtual': compute_loss_virtual(rgb_nr, rgb_gt)}
         if self.cfg['use_nr_fine_loss']:

@@ -210,7 +210,7 @@ class NeuralRayBaseRenderer(nn.Module):
 
         outputs={'virtual_pixel_colors_nr': pixel_colors_nr, 'virtual_hit_prob_nr': hit_prob_nr}
 
-        virtual_depth = torch.sum(hit_prob_nr.detach() * que_depth, -1, keepdim=True) # qn,rn,1
+        virtual_depth = torch.sum(hit_prob_nr * que_depth, -1, keepdim=True) # qn,rn,1
         virtual_pts, virtual_dir = depth2points(que_imgs_info, virtual_depth)
         virtual_prj_dict = project_points_dict_rgb(ref_imgs_info, virtual_pts)
 
@@ -219,12 +219,12 @@ class NeuralRayBaseRenderer(nn.Module):
         # rgb = rgb.squeeze(3).permute(1,2,3,0) # (qn, rn, -1, rfn)
         mask = virtual_prj_dict['mask'].squeeze(3).permute(1,2,3,0).type(torch.float) # (qn, rn, -1, rfn)
 
-        mix_rgb = torch.sum(rgb * mask, dim=-1) / (torch.sum(mask, dim=-1) + 1e-3) # (qn, rn, -1,
-        # qn, rn, 3
-        outputs['virtual_pixel_colors_gt'] = mix_rgb.detach()
+        # mix_rgb = torch.sum(rgb * mask, dim=-1) / (torch.sum(mask, dim=-1) + 1e-3) # (qn, rn, -1,
+        # outputs['virtual_pixel_colors_gt'] = mix_rgb
+        outputs['virtual_pixel_colors_gt'] = rgb
 
-        virtual_mask = torch.sum(mask.int(), -1) > self.cfg['ray_mask_view_num'] # qn,rn,1
-
+        # virtual_mask = torch.sum(mask.int(), -1) > self.cfg['ray_mask_view_num'] # qn,rn,1
+        virtual_mask = torch.sum(mask.int(), -1) > 0
         # print('debug mask', torch.sum(virtual_mask), torch.numel(virtual_mask))
         # virtual_mask = virtual_mask & (virtual_depth >= que_imgs_info['depth_range'][:, 0]) & (virtual_depth <= que_imgs_info['depth_range'][:, 1])
         outputs['virtual_pixel_mask'] = virtual_mask.squeeze(-1)
@@ -653,30 +653,30 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
 
         
 
-        # NOTE add virtual ids
-        virtual_id = np.random.randint(0,len(self.virtual_ids))
+            # # NOTE add virtual ids
+            # virtual_id = np.random.randint(0,len(self.virtual_ids))
 
-        virtual_imgs_info = imgs_info_slice(self.virtual_imgs_info, torch.from_numpy(np.asarray([virtual_id])).long())
-        qn, _, hn, wn = que_imgs_info['imgs'].shape
-        coords = np.stack(np.meshgrid(np.arange(wn), np.arange(hn)), -1)
+            # virtual_imgs_info = imgs_info_slice(self.virtual_imgs_info, torch.from_numpy(np.asarray([virtual_id])).long())
+            # qn, _, hn, wn = que_imgs_info['imgs'].shape
+            # coords = np.stack(np.meshgrid(np.arange(wn), np.arange(hn)), -1)
 
-        # coords = coords[256-192:256+192, 320-256:320+256,:]
-        coords = coords.reshape(-1, 2).astype(np.float32)
-        # coords = coords.reshape([1, -1, 2])
+            # # coords = coords[256-192:256+192, 320-256:320+256,:]
+            # coords = coords.reshape(-1, 2).astype(np.float32)
+            # # coords = coords.reshape([1, -1, 2])
 
-        rand_choice = np.random.choice(coords.shape[0], 2048, replace=False)
-        coords = coords[rand_choice, :].reshape(1, 2048, -1)
+            # rand_choice = np.random.choice(coords.shape[0], 512, replace=False)
+            # coords = coords[rand_choice, :].reshape(1, 512, -1)
 
-        virtual_imgs_info['coords'] = torch.from_numpy(coords)
-        virtual_imgs_info = to_cuda(virtual_imgs_info)
+            # virtual_imgs_info['coords'] = torch.from_numpy(coords)
+            # virtual_imgs_info = to_cuda(virtual_imgs_info)
 
-        ref_imgs_info['img_feats'] = ref_img_feats
-        virtual_render_outputs = self.render_virtual(virtual_imgs_info.copy(), ref_imgs_info.copy(), True)
+            # ref_imgs_info['img_feats'] = ref_img_feats
+            # virtual_render_outputs = self.render_virtual(virtual_imgs_info.copy(), ref_imgs_info.copy(), True)
 
-        for k in ['virtual_pixel_colors_nr', 'virtual_pixel_colors_gt', 'virtual_pixel_mask',\
-                'virtual_pixel_colors_nr_fine', 'virtual_pixel_colors_gt_fine', 'virtual_pixel_mask_fine']:
-            render_outputs[k] = virtual_render_outputs[k]
-        #########################################
+            # for k in ['virtual_pixel_colors_nr', 'virtual_pixel_colors_gt', 'virtual_pixel_mask',\
+            #         'virtual_pixel_colors_nr_fine', 'virtual_pixel_colors_gt_fine', 'virtual_pixel_mask_fine']:
+            #     render_outputs[k] = virtual_render_outputs[k]
+            # #########################################
 
         # clear some values for outputs
         ref_imgs_info.pop('ray_feats')
@@ -684,7 +684,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         
         if 'img_feats' in ref_imgs_info: ref_imgs_info.pop('img_feats')
         if 'img_feats' in que_imgs_info: que_imgs_info.pop('img_feats')
-        if 'img_feats' in virtual_imgs_info: virtual_imgs_info.pop('img_feats')
+        # if 'img_feats' in virtual_imgs_info: virtual_imgs_info.pop('img_feats')
         render_outputs.update({'que_imgs_info': que_imgs_info})
         return render_outputs
 
