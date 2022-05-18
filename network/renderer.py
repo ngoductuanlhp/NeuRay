@@ -489,19 +489,41 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
             gen_renderer = gen_renderer.eval()
 
             # init from generalization model
-            print('initialization ...')
-            for ref_id in tqdm(self.ref_ids):
-                self.ray_feats.append(nn.Parameter(self._init_raw_visibility_features(ref_id, gen_renderer.init_net)))
+            if self.cfg['scratch_mlp']:
+                print('init visibility from scratch !')
+                fh, fw = self.cfg['ray_feats_res']
+                dim = self.cfg['ray_feats_dim']
+                ref_num = len(self.ref_ids)
+                for k in range(ref_num):
+                    self.ray_feats.append(nn.Parameter(torch.randn(1,dim,128,160)))
+            else:    
+                # init from generalization model
+                print('initialization ...')
+                for ref_id in tqdm(self.ref_ids):
+                    self.ray_feats.append(nn.Parameter(self._init_raw_visibility_features(ref_id, gen_renderer.init_net)))
 
-            # init other parameters
-            self.vis_encoder.load_state_dict(gen_renderer.vis_encoder.state_dict())
-            self.dist_decoder.load_state_dict(gen_renderer.dist_decoder.state_dict())
-            self.agg_net.load_state_dict(gen_renderer.agg_net.state_dict())
-            self.sph_fitter.load_state_dict(gen_renderer.sph_fitter.state_dict())
-            self.image_encoder.load_state_dict(gen_renderer.image_encoder.state_dict())
-            if self.cfg['use_hierarchical_sampling']:
-                self.fine_dist_decoder.load_state_dict(gen_renderer.fine_dist_decoder.state_dict())
-                self.fine_agg_net.load_state_dict(gen_renderer.fine_agg_net.state_dict())
+            if self.cfg['scratch_mlp']:
+                print('init mlp from scratch !')
+                # init other parameters
+                self.vis_encoder.load_state_dict(gen_renderer.vis_encoder.state_dict())
+                self.dist_decoder.load_state_dict(gen_renderer.dist_decoder.state_dict())
+                # self.agg_net.load_state_dict(gen_renderer.agg_net.state_dict())
+                # self.sph_fitter.load_state_dict(gen_renderer.sph_fitter.state_dict())
+                self.image_encoder.load_state_dict(gen_renderer.image_encoder.state_dict())
+                if self.cfg['use_hierarchical_sampling']:
+                    self.fine_dist_decoder.load_state_dict(gen_renderer.fine_dist_decoder.state_dict())
+                    # self.fine_agg_net.load_state_dict(gen_renderer.fine_agg_net.state_dict())
+
+            else:
+                # init other parameters
+                self.vis_encoder.load_state_dict(gen_renderer.vis_encoder.state_dict())
+                self.dist_decoder.load_state_dict(gen_renderer.dist_decoder.state_dict())
+                self.agg_net.load_state_dict(gen_renderer.agg_net.state_dict())
+                self.sph_fitter.load_state_dict(gen_renderer.sph_fitter.state_dict())
+                self.image_encoder.load_state_dict(gen_renderer.image_encoder.state_dict())
+                if self.cfg['use_hierarchical_sampling']:
+                    self.fine_dist_decoder.load_state_dict(gen_renderer.fine_dist_decoder.state_dict())
+                    self.fine_agg_net.load_state_dict(gen_renderer.fine_agg_net.state_dict())
         else:
             print('init from scratch !')
             fh, fw = self.cfg['ray_feats_res']
