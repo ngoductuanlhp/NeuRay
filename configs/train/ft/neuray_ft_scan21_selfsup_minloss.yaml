@@ -1,4 +1,4 @@
-name: neuray_ft_scan21_selfsup_minloss
+name: neuray_ft_scan21_selfsup_minloss_ssim
 
 # network
 network: neuray_ft

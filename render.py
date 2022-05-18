@@ -50,13 +50,15 @@ def prepare_render_info(database, pose_type, pose_fn, use_depth, has_depth=False
         return que_poses, que_Ks, que_shapes, que_depth_ranges, ref_ids, render_ids, que_depths
     return que_poses, que_Ks, que_shapes, que_depth_ranges, ref_ids, render_ids
 
-def save_renderings(output_dir, qi, render_info, h, w):
+def save_renderings(output_dir, qi, render_info, h, w, only_fine=False):
     def output_image(suffix):
         if f'pixel_colors_{suffix}' in render_info:
             render_image = color_map_backward(render_info[f'pixel_colors_{suffix}'].cpu().numpy().reshape([h, w, 3]))
+
             imsave(f'{output_dir}/{qi}-{suffix}.jpg', render_image)
 
-    output_image('nr')
+    if not only_fine:
+        output_image('nr')
     output_image('nr_fine')
 
 def save_depth(output_dir, qi, render_info, h, w, depth_range):
@@ -159,6 +161,8 @@ def render_video_ft(database_name, cfg_fn, pose_type, pose_fn, render_depth=Fals
     cfg['ray_feats_res'] = [h,w]
     cfg['ray_feats_dim'] = dim
     renderer = name2network[cfg['network']](cfg)
+
+    print('load weight from', f'data/model/{cfg["name"]}/model_best.pth')
     renderer.load_state_dict(ckpt['network_state_dict'])
     step=ckpt['step']
     renderer.cuda()
@@ -180,9 +184,9 @@ def render_video_ft(database_name, cfg_fn, pose_type, pose_fn, render_depth=Fals
         que_imgs_info = build_render_imgs_info(que_poses[qi], que_Ks[qi], que_shapes[qi], que_depth_ranges[qi], que_depths=que_depths[qi])
         que_imgs_info = to_cuda(imgs_info_to_torch(que_imgs_info))
         with torch.no_grad():
-            render_info = renderer.render_pose(que_imgs_info, debug=True)
+            render_info = renderer.render_pose(que_imgs_info, debug=False)
         h, w = que_shapes[qi]
-        save_renderings(output_dir, qi, render_info, h, w)
+        save_renderings(output_dir, qi, render_info, h, w, only_fine=True)
         if render_depth:
             save_depth(output_dir, qi, render_info, h, w, que_depth_ranges[qi])
 

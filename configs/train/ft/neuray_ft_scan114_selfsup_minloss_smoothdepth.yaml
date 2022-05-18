@@ -1,4 +1,4 @@
-name: neuray_ft_scan114_selfsup_minloss_ssim
+name: neuray_ft_scan114_selfsup_minloss_ssim_smoothdepth
 
 # network
 network: neuray_ft
@@ -12,10 +12,11 @@ database_split: val_all
 train_ray_num: 512
 use_self_hit_prob: true
 validate_initialization: true
+render_depth_virtual: true
 
 # loss
 # loss: [render, consist, prompt]
-loss: [render, consist, virtual_render]
+loss: [render, consist, virtual_render, virtual_smooth_depth]
 val_loss: [render, consist]
 # loss: [render, consist]
 val_metric: [psnr_ssim, vis_img]
