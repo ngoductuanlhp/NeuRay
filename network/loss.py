@@ -133,6 +133,39 @@ class DepthLoss(Loss):
             outputs['loss_depth_fine'] = compute_loss(data_pr['depth_mean_fine'])
         return outputs
 
+
+class SSIM(nn.Module):
+    """Layer to compute the SSIM loss between a pair of images
+    """
+    def __init__(self):
+        super(SSIM, self).__init__()
+        self.mu_x_pool   = nn.AvgPool2d(3, 1)
+        self.mu_y_pool   = nn.AvgPool2d(3, 1)
+        self.sig_x_pool  = nn.AvgPool2d(3, 1)
+        self.sig_y_pool  = nn.AvgPool2d(3, 1)
+        self.sig_xy_pool = nn.AvgPool2d(3, 1)
+
+        self.refl = nn.ReflectionPad2d(1)
+
+        self.C1 = 0.01 ** 2
+        self.C2 = 0.03 ** 2
+
+    def forward(self, x, y):
+        x = self.refl(x)
+        y = self.refl(y)
+
+        mu_x = self.mu_x_pool(x)
+        mu_y = self.mu_y_pool(y)
+
+        sigma_x  = self.sig_x_pool(x ** 2) - mu_x ** 2
+        sigma_y  = self.sig_y_pool(y ** 2) - mu_y ** 2
+        sigma_xy = self.sig_xy_pool(x * y) - mu_x * mu_y
+
+        SSIM_n = (2 * mu_x * mu_y + self.C1) * (2 * sigma_xy + self.C2)
+        SSIM_d = (mu_x ** 2 + mu_y ** 2 + self.C1) * (sigma_x + sigma_y + self.C2)
+
+        return torch.clamp((1 - SSIM_n / SSIM_d) / 2, 0, 1)
+
 class VirtualRenderLoss(Loss):
     default_cfg={
         'use_ray_mask': True,
@@ -141,21 +174,46 @@ class VirtualRenderLoss(Loss):
     def __init__(self, cfg):
         self.cfg={**self.default_cfg,**cfg}
         super().__init__([f'loss_rgb_virtual'])
+        self.ssim = SSIM().cuda()
 
     def __call__(self, data_pr, data_gt, step, **kwargs):
-        rgb_gt = data_pr['virtual_pixel_colors_gt'] # 1,rn,3
+        rgb_gt = data_pr['virtual_pixel_colors_gt'] # 1,rn,3, rfn
         rgb_nr = data_pr['virtual_pixel_colors_nr'] # 1,rn,3
 
-        def compute_loss_virtual(rgb_pr, rgb_gt, fine=False):
-            loss=torch.sum((rgb_pr-rgb_gt)**2,-1)        # b,n
+        
 
+        def compute_loss_virtual(rgb_pr, rgb_gt, fine=False):
+
+            rgb_gt = rgb_gt.reshape(1, 32, 32, 3, -1).permute(4, 0, 3, 1, 2) # rfn, 1, c, h ,w
+            rgb_pr = rgb_pr.reshape(1, 32, 32, 3).permute(0, 3, 1, 2) # 1, c, h, w
+
+            losses = []
+            for r in range(rgb_gt.shape[0]):
+                rgb_gt_single = rgb_gt[r,...]
+                abs_diff = torch.abs(rgb_gt_single - rgb_pr)
+                l1_loss = abs_diff.mean(1)
+
+                ssim_loss = self.ssim(rgb_pr, rgb_gt_single).mean(1)
+                loss = 0.85 * ssim_loss + 0.15 * l1_loss # 1, h, w
+                losses.append(loss.reshape(loss.shape[0], -1))
+            # loss=torch.sum((rgb_pr-rgb_gt)**2,-1)
+            # l2_loss = torch.sum((rgb_pr.unsqueeze(-1) - rgb_gt)**2, 2)  # 1, rn, rfn
+            losses = torch.stack(losses, dim=0) # rfn, 1, rn
+
+            temporal = 10.
+            final_loss = torch.logsumexp(losses * temporal, dim=0) / temporal # 1, rn
+            # loss = torch.log(torch.sum(torch.exp(loss * temporal), dim=-1)) / temporal
+            # loss = torch.sum((rgb_pr.unsqueeze(-1) - rgb_gt)**2, 2) # 1, rn, rfn
+            # loss = torch.min(loss, -1)[0]
             if self.cfg['use_ray_mask']:
                 # ray_mask = data_pr['virtual_pixel_mask_fine'].float() if fine else data_pr['virtual_pixel_mask'].float()# 1,rn
                 ray_mask = data_pr['virtual_pixel_mask'].float()
-                loss = torch.sum(loss*ray_mask,1)/(torch.sum(ray_mask,1)+1e-3)
+                final_loss = torch.sum(final_loss * ray_mask,1) / (torch.sum(ray_mask, 1) + 1e-3)
             else:
-                loss = torch.mean(loss, 1)
-            return loss
+                final_loss = torch.mean(final_loss, 1)
+
+            # print('final_loss', final_loss)
+            return final_loss * 0.1
 
         results = {'loss_rgb_nr_virtual': compute_loss_virtual(rgb_nr, rgb_gt)}
         if self.cfg['use_nr_fine_loss']:
@@ -166,9 +224,58 @@ class VirtualRenderLoss(Loss):
         #     results['loss_rgb_nr_fine'] = compute_loss_virtual(data_pr['pixel_colors_nr_fine'], rgb_gt, fine=True)
         return results
 
+def get_smooth_loss(disp, img):
+    """Computes the smoothness loss for a disparity image
+    The color image is used for edge-aware smoothness
+    """
+    grad_disp_x = torch.abs(disp[:, :, :, :-1] - disp[:, :, :, 1:])
+    grad_disp_y = torch.abs(disp[:, :, :-1, :] - disp[:, :, 1:, :])
+
+    grad_img_x = torch.mean(torch.abs(img[:, :, :, :-1] - img[:, :, :, 1:]), 1, keepdim=True)
+    grad_img_y = torch.mean(torch.abs(img[:, :, :-1, :] - img[:, :, 1:, :]), 1, keepdim=True)
+
+    grad_disp_x *= torch.exp(-grad_img_x)
+    grad_disp_y *= torch.exp(-grad_img_y)
+
+    return grad_disp_x.mean() + grad_disp_y.mean()
+
+class VirtualSmoothDepth(Loss):
+    default_cfg={
+        'use_ray_mask': True,
+        'use_nr_fine_loss': False,
+    }
+    def __init__(self, cfg):
+        self.cfg={**self.default_cfg,**cfg}
+        super().__init__([f'loss_virtual_smooth_depth'])
+
+    def __call__(self, data_pr, data_gt, step, **kwargs):
+        def compute_smooth_depth_virtual(depth, rgb):
+
+            depth = depth.reshape(1, 32, 32, 1).permute(0, 3, 1, 2) # 1, 1, h, w
+            rgb = rgb.reshape(1, 32, 32, 3).permute(0, 3, 1, 2) # 1, c, h, w
+
+            mean_depth = depth.mean(2, True).mean(3, True)
+            norm_depth = depth / (mean_depth + 1e-7)
+
+            smooth_loss = get_smooth_loss(norm_depth, rgb.detach())
+
+            return torch.mean(smooth_loss)
+
+        depth_virtual = data_pr['depth_virtual'] # 1,rn,
+        rgb_pr = data_pr['virtual_pixel_colors_nr'] # 1,rn,3
+
+        depth_virtual_fine = data_pr['depth_virtual_fine'] # 1,rn,
+        rgb_pr_fine = data_pr['virtual_pixel_colors_nr_fine'] # 1,rn,3
+
+        results = {'loss_virtual_smooth_depth': compute_smooth_depth_virtual(depth_virtual, rgb_pr),
+                    'loss_virtual_smooth_depth_fine': compute_smooth_depth_virtual(depth_virtual_fine, rgb_pr_fine)}
+
+        return results
+
 name2loss={
     'render': RenderLoss,
     'virtual_render': VirtualRenderLoss,
     'depth': DepthLoss,
     'consist': ConsistencyLoss,
+    'virtual_smooth_depth': VirtualSmoothDepth,
 }
