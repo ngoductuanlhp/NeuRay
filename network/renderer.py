@@ -398,6 +398,8 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         'ray_feats_res': [200,200], # size of raw visibility feature G': H=200,W=200
         'ray_feats_dim': 32, # channel number of raw visibility feature G'
 
+        'scratch_mlp': False
+
     }
     def __init__(self, cfg):
         cfg = {**self.default_cfg,**cfg}
