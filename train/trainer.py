@@ -99,6 +99,9 @@ class Trainer:
         best_para,start_step=self._load_model()
         train_iter=iter(self.train_set)
 
+        trainable_params = sum([x.nelement() for x in self.train_network.parameters() if x.requires_grad])
+        print('# training parameters: {}'.format(trainable_params))
+
         pbar=tqdm(total=self.cfg['total_step'],bar_format='{r_bar}')
         pbar.update(start_step)
         for step in range(start_step,self.cfg['total_step']):

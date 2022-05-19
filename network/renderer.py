@@ -398,7 +398,8 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         'ray_feats_res': [200,200], # size of raw visibility feature G': H=200,W=200
         'ray_feats_dim': 32, # channel number of raw visibility feature G'
 
-        'scratch_mlp': False
+        'scratch_mlp': False,
+        'free_mlp': False
 
     }
     def __init__(self, cfg):
@@ -496,13 +497,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
                 ref_num = len(self.ref_ids)
                 for k in range(ref_num):
                     self.ray_feats.append(nn.Parameter(torch.randn(1,dim,128,160)))
-            else:    
-                # init from generalization model
-                print('initialization ...')
-                for ref_id in tqdm(self.ref_ids):
-                    self.ray_feats.append(nn.Parameter(self._init_raw_visibility_features(ref_id, gen_renderer.init_net)))
 
-            if self.cfg['scratch_mlp']:
                 print('init mlp from scratch !')
                 # init other parameters
                 self.vis_encoder.load_state_dict(gen_renderer.vis_encoder.state_dict())
@@ -514,7 +509,12 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
                     self.fine_dist_decoder.load_state_dict(gen_renderer.fine_dist_decoder.state_dict())
                     # self.fine_agg_net.load_state_dict(gen_renderer.fine_agg_net.state_dict())
 
-            else:
+            else:    
+                # init from generalization model
+                print('initialization ...')
+                for ref_id in tqdm(self.ref_ids):
+                    self.ray_feats.append(nn.Parameter(self._init_raw_visibility_features(ref_id, gen_renderer.init_net)))
+
                 # init other parameters
                 self.vis_encoder.load_state_dict(gen_renderer.vis_encoder.state_dict())
                 self.dist_decoder.load_state_dict(gen_renderer.dist_decoder.state_dict())
@@ -524,6 +524,15 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
                 if self.cfg['use_hierarchical_sampling']:
                     self.fine_dist_decoder.load_state_dict(gen_renderer.fine_dist_decoder.state_dict())
                     self.fine_agg_net.load_state_dict(gen_renderer.fine_agg_net.state_dict())
+
+            if self.cfg['free_mlp']:
+                print('############ free MLP ##############')
+                for mod_name in ['vis_encoder', 'dist_decoder', 'agg_net', 'sph_fitter', 'image_encoder', 'fine_dist_decoder', 'fine_agg_net']:
+                    mod = getattr(self, mod_name)
+                    for p in mod.parameters():
+                        p.requires_grad = False
+                    
+                    mod.eval()
         else:
             print('init from scratch !')
             fh, fw = self.cfg['ray_feats_res']
@@ -569,6 +578,10 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
         return render_outputs
 
     def train_step(self):
+        if self.cfg['free_mlp']:
+            for mod_name in ['vis_encoder', 'dist_decoder', 'agg_net', 'sph_fitter', 'image_encoder', 'fine_dist_decoder', 'fine_agg_net']:
+                mod = getattr(self, mod_name)
+                mod.eval()
         # select neighboring views for training
         que_i = np.random.randint(0,len(self.ref_ids))
         ref_idx = self.ref_dist_idx[que_i]
