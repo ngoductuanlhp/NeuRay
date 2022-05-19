@@ -5,7 +5,7 @@ import numpy as np
 
 from utils.base_utils import get_coords_mask
 from utils.dataset_utils import set_seed
-from utils.imgs_info import build_imgs_info, random_crop, random_flip, pad_imgs_info, imgs_info_slice, \
+from utils.imgs_info import build_imgs_info, random_crop, random_flip, pad_imgs_info, pad_imgs_info_no_depth, imgs_info_slice, \
     imgs_info_to_torch
 from utils.view_select import compute_nearest_camera_indices
 
@@ -60,7 +60,7 @@ def build_src_imgs_info_select(database, ref_ids, ref_ids_all, cost_volume_nn_nu
     ref_cv_idx = ref_cv_idx[np.argsort(ref_cv_idx_)]  # sort
     ref_cv_idx = ref_cv_idx.reshape([rfn, nn])
     is_aligned = not database.database_name.startswith('space')
-    ref_imgs_info = build_imgs_info(database, ref_ids_in, pad_interval, is_aligned)
+    ref_imgs_info = build_imgs_info(database, ref_ids_in, pad_interval, is_aligned, has_depth=False)
     return ref_imgs_info, ref_cv_idx, ref_real_idx
 
 class GeneralRendererDataset(Dataset):
@@ -136,17 +136,24 @@ class GeneralRendererDataset(Dataset):
 
     def get_database_ref_que_ids(self, index):
         if self.is_train:
+            # if len(self.database_types) == 1:
+            #     database_type = self.database_types[0]
+            #     database_scene_name = self.type2scene_names[database_type]
+            #     database = parse_database_name(database_scene_name)
+            # else:
             database_type = np.random.choice(self.database_types,1,False,p=self.database_weights)[0]
             database_scene_name = np.random.choice(self.type2scene_names[database_type])
             database = parse_database_name(database_scene_name)
             # if there is no depth for all views, we repeat random sample until find a scene with depth
-            while True:
-                ref_ids = database.get_img_ids(check_depth_exist=True)
-                if len(ref_ids)==0:
-                    database_type = np.random.choice(self.database_types, 1, False, self.database_weights)[0]
-                    database_scene_name = np.random.choice(self.type2scene_names[database_type])
-                    database = parse_database_name(database_scene_name)
-                else: break
+            # while True:
+            #     ref_ids = database.get_img_ids(check_depth_exist=True)
+            #     if len(ref_ids)==0:
+            #         database_type = np.random.choice(self.database_types, 1, False, self.database_weights)[0]
+            #         database_scene_name = np.random.choice(self.type2scene_names[database_type])
+            #         database = parse_database_name(database_scene_name)
+            #     else: break
+
+            ref_ids = database.get_img_ids(check_depth_exist=False)
             que_id = np.random.choice(ref_ids)
             if database.database_name.startswith('real_estate'):
                 que_id, ref_ids = select_train_ids_for_real_estate(ref_ids)
@@ -302,6 +309,8 @@ class GeneralRendererDataset(Dataset):
         que_imgs_info['depth_range'] = depth_range_all[-1:]
 
     def __getitem__(self, index):
+
+        # breakpoint()
         set_seed(index, self.is_train)
         database, que_id, ref_ids_all = self.get_database_ref_que_ids(index)
         ref_ids = self.select_working_views(database, que_id, ref_ids_all)
@@ -312,10 +321,13 @@ class GeneralRendererDataset(Dataset):
             ref_idx = compute_nearest_camera_indices(database, ref_ids)[:,1:4] # used in cost volume construction
             is_aligned = not database.database_name.startswith('space')
             ref_imgs_info = build_imgs_info(database, ref_ids, -1, is_aligned)
-        que_imgs_info = build_imgs_info(database, [que_id], has_depth=self.is_train)
+        # que_imgs_info = build_imgs_info(database, [que_id], has_depth=self.is_train)
+        que_imgs_info = build_imgs_info(database, [que_id], has_depth=False)
 
         if self.is_train:
             # data augmentation
+
+            # breakpoint()
             depth_range_all = np.concatenate([ref_imgs_info['depth_range'],que_imgs_info['depth_range']],0)
             if database.database_name.startswith('gso'): # only used in gso currently
                 depth_all = np.concatenate([ref_imgs_info['depth'],que_imgs_info['depth']],0)
@@ -325,6 +337,9 @@ class GeneralRendererDataset(Dataset):
             depth_range_all = self.random_change_depth_range(depth_range_all, depth_all, mask_all, database.database_name)
             ref_imgs_info['depth_range'] = depth_range_all[:-1]
             que_imgs_info['depth_range'] = depth_range_all[-1:]
+
+
+            # breakpoint()
 
             if database.database_name.startswith('gso') and self.cfg['use_depth']:
                 depth_aug = self.add_depth_noise(ref_imgs_info['depth'], ref_imgs_info['masks'], ref_imgs_info['depth_range'])
@@ -354,7 +369,10 @@ class GeneralRendererDataset(Dataset):
             coords = np.stack(np.meshgrid(np.arange(wn),np.arange(hn)),-1)
             coords = coords.reshape([1,-1,2]).astype(np.float32)
         que_imgs_info['coords'] = coords
-        ref_imgs_info = pad_imgs_info(ref_imgs_info,self.cfg['ref_pad_interval'])
+        # ref_imgs_info = pad_imgs_info(ref_imgs_info,self.cfg['ref_pad_interval'])
+        ref_imgs_info = pad_imgs_info_no_depth(ref_imgs_info,self.cfg['ref_pad_interval'])
+
+        # breakpoint()
 
         # don't feed depth to gpu
         if not self.cfg['use_depth']:
@@ -372,6 +390,8 @@ class GeneralRendererDataset(Dataset):
 
         ref_imgs_info = imgs_info_to_torch(ref_imgs_info)
         que_imgs_info = imgs_info_to_torch(que_imgs_info)
+
+        # breakpoint()
 
         outputs = {'ref_imgs_info': ref_imgs_info, 'que_imgs_info': que_imgs_info, 'scene_name': database.database_name}
         if self.cfg['use_src_imgs']: outputs['src_imgs_info'] = imgs_info_to_torch(src_imgs_info)

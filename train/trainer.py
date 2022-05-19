@@ -36,6 +36,7 @@ class Trainer:
     def _init_dataset(self):
         self.train_set=name2dataset[self.cfg['train_dataset_type']](self.cfg['train_dataset_cfg'], True)
         self.train_set=DataLoader(self.train_set,1,True,num_workers=self.cfg['worker_num'],collate_fn=dummy_collate_fn)
+        # self.train_set=DataLoader(self.train_set,1,True,num_workers=1,collate_fn=dummy_collate_fn)
         print(f'train set len {len(self.train_set)}')
         self.val_set_list, self.val_set_names = [], []
         for val_set_cfg in self.cfg['val_set_list']:

@@ -123,7 +123,7 @@ python run_training.py --cfg configs/train/gen/neuray_gen_depth_train.yaml
 
 Train the model with NeuRay initialized from constructed cost volumes.
 ```shell
-python run_training.py --cfg configs/train/gen/neuray_gen_cost_volume_train.yaml
+python run_training.py --cfg configs/train/gen/neuray_gen_cost_volume_train_dtu.yaml
 ```
 
 Models will be saved at `data/model`. On every 10k steps, we will validate the model and images will be saved at `data/vis_val/<model_name>-<val_set_name>`

@@ -73,6 +73,22 @@ def pad_imgs_info(ref_imgs_info,pad_interval):
     if ref_depth_gt is not None:
         ref_imgs_info['true_depth'] = ref_depth_gt
     return ref_imgs_info
+    
+def pad_imgs_info_no_depth(ref_imgs_info, pad_interval):
+    ref_imgs, ref_masks = ref_imgs_info['imgs'], ref_imgs_info['masks']
+    ref_depth_gt = ref_imgs_info['true_depth'] if 'true_depth' in ref_imgs_info else None
+    rfn, _, h, w = ref_imgs.shape
+    ph = (pad_interval - (h % pad_interval)) % pad_interval
+    pw = (pad_interval - (w % pad_interval)) % pad_interval
+    if ph != 0 or pw != 0:
+        ref_imgs = np.pad(ref_imgs, ((0, 0), (0, 0), (0, ph), (0, pw)), 'reflect')
+        ref_masks = np.pad(ref_masks, ((0, 0), (0, 0), (0, ph), (0, pw)), 'reflect')
+        if ref_depth_gt is not None:
+            ref_depth_gt = np.pad(ref_depth_gt, ((0, 0), (0, 0), (0, ph), (0, pw)), 'reflect')
+    ref_imgs_info['imgs'], ref_imgs_info['masks'] = ref_imgs, ref_masks
+    if ref_depth_gt is not None:
+        ref_imgs_info['true_depth'] = ref_depth_gt
+    return ref_imgs_info
 
 def build_imgs_info(database, ref_ids, pad_interval=-1, is_aligned=True, align_depth_range=False, has_depth=True, replace_none_depth = False):
     if not is_aligned:
