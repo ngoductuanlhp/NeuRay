@@ -527,12 +527,23 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
 
             if self.cfg['free_mlp']:
                 print('############ free MLP ##############')
-                for mod_name in ['vis_encoder', 'dist_decoder', 'agg_net', 'sph_fitter', 'image_encoder', 'fine_dist_decoder', 'fine_agg_net']:
+                for mod_name in ['dist_decoder', 'agg_net', 'sph_fitter', 'image_encoder', 'fine_dist_decoder', 'fine_agg_net']:
                     mod = getattr(self, mod_name)
                     for p in mod.parameters():
                         p.requires_grad = False
                     
                     mod.eval()
+
+                dim = self.cfg['ray_feats_dim']
+                ref_num = len(self.ref_ids)
+
+                del self.ray_feats
+                self.ray_feats = nn.ParameterList()
+                for k in range(ref_num):
+                    self.ray_feats.append(nn.Parameter(torch.randn(1,dim*2,128,160)))
+
+                del self.vis_encoder
+                self.vis_encoder = name2vis_encoder['large'](self.cfg['vis_encoder_cfg'])
         else:
             print('init from scratch !')
             fh, fw = self.cfg['ray_feats_res']
@@ -579,7 +590,7 @@ class NeuralRayFtRenderer(NeuralRayBaseRenderer):
 
     def train_step(self):
         if self.cfg['free_mlp']:
-            for mod_name in ['vis_encoder', 'dist_decoder', 'agg_net', 'sph_fitter', 'image_encoder', 'fine_dist_decoder', 'fine_agg_net']:
+            for mod_name in ['dist_decoder', 'agg_net', 'sph_fitter', 'image_encoder', 'fine_dist_decoder', 'fine_agg_net']:
                 mod = getattr(self, mod_name)
                 mod.eval()
         # select neighboring views for training

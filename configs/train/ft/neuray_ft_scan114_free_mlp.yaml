@@ -1,4 +1,4 @@
-name: neuray_ft_scan114_free_mlp
+name: neuray_ft_scan114_free_mlp_big_vis
 
 # network
 network: neuray_ft

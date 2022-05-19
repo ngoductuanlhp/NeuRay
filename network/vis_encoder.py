@@ -20,6 +20,24 @@ class DefaultVisEncoder(nn.Module):
         feats = self.out_conv(torch.cat([imgs_feats, ray_feats],1))
         return feats
 
+class VisEncoderLarge(nn.Module):
+    default_cfg={}
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg={**self.default_cfg,**cfg}
+        norm_layer = lambda dim: nn.InstanceNorm2d(dim,track_running_stats=False,affine=True)
+        self.out_conv=nn.Sequential(
+            conv3x3(32*2 + 32, 64),
+            ResidualBlock(64, 64, norm_layer=norm_layer),
+            ResidualBlock(64, 64, norm_layer=norm_layer),
+            conv1x1(64, 32),
+        )
+
+    def forward(self, ray_feats, imgs_feats):
+        feats = self.out_conv(torch.cat([imgs_feats, ray_feats],1))
+        return feats
+
 name2vis_encoder={
     'default': DefaultVisEncoder,
+    'large': VisEncoderLarge
 }
