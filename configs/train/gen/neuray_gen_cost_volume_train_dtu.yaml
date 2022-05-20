@@ -22,7 +22,7 @@ depth_correct_ratio: 1.0
 
 # lr
 total_step: 400000
-val_interval: 10000
+val_interval: 40000
 lr_type: exp_decay
 lr_cfg:
   lr_init: 4.0e-4

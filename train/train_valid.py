@@ -71,11 +71,14 @@ class ValidationEvaluator:
                             eval_results[k]=[v]
 
                 if save_dir:
-                    _, _, h, w = outputs['que_imgs_info']['imgs'].shape
-                    save_renderings(save_dir, data_i, outputs, h, w, save_fine_only=True)
+                    try: 
+                        _, _, h, w = outputs['que_imgs_info']['imgs'].shape
+                        save_renderings(save_dir, data_i, outputs, h, w, save_fine_only=True)
 
-                    que_depth_ranges = outputs['que_imgs_info']['depth_range'][0].cpu().detach().numpy()
-                    save_depth(save_dir, data_i, outputs, h, w, que_depth_ranges)
+                        que_depth_ranges = outputs['que_imgs_info']['depth_range'][0].cpu().detach().numpy()
+                        save_depth(save_dir, data_i, outputs, h, w, que_depth_ranges)
+                    except:
+                        print('cannot save')
 
         for k,v in eval_results.items():
             eval_results[k]=np.concatenate(v,axis=0)

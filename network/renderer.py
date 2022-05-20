@@ -366,6 +366,8 @@ class NeuralRayGenRenderer(NeuralRayBaseRenderer):
         render_outputs = self.render_call(que_imgs_info, ref_imgs_info, is_train, src_imgs_info)
         if (self.cfg['use_depth_loss'] and 'true_depth' in ref_imgs_info) or (not is_train):
             render_outputs.update(self.predict_mean_for_depth_loss(ref_imgs_info))
+
+        render_outputs.update({'ref_imgs_info': ref_imgs_info, 'que_imgs_info': que_imgs_info})
         return render_outputs
 
 

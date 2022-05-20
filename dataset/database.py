@@ -1268,7 +1268,8 @@ def get_database_split(database: BaseDatabase, split_type='val'):
         splits = split_type.split('_')
         depth_valid = not(len(splits)>1 and splits[1]=='all')
         if database_name.startswith('nerf_synthetic'):
-            train_ids = [img_id for img_id in database.get_img_ids(check_depth_exist=depth_valid) if img_id.startswith('tr')]
+            # train_ids = [img_id for img_id in database.get_img_ids(check_depth_exist=depth_valid) if img_id.startswith('tr')]
+            train_ids = [img_id for img_id in database.get_img_ids(check_depth_exist=False) if img_id.startswith('tr')]
             val_ids = nerf_syn_val_ids
         elif database_name.startswith('llff'):
             val_ids = database.get_img_ids()[::8]
